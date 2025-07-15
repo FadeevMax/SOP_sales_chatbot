@@ -2,12 +2,35 @@ import streamlit as st
 from openai import OpenAI
 import time
 import os
+import uuid
 
 # --- Setup ---
 st.set_page_config(page_title="GTI SOP Sales Coordinator", layout="centered")
 
+# --- Initialize Session State ---
+def initialize_session_state():
+    """Initialize all required session state variables"""
+    if "user_id" not in st.session_state:
+        st.session_state.user_id = str(uuid.uuid4())
+    
+    if "model" not in st.session_state:
+        st.session_state.model = "gpt-4o"
+    
+    if "file_path" not in st.session_state:
+        st.session_state.file_path = "GTI Data Base and SOP (1).pdf"
+    
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    
+    if "assistant_setup_complete" not in st.session_state:
+        st.session_state.assistant_setup_complete = False
+
+# Call initialization
+initialize_session_state()
+
 # --- Sidebar Navigation ---
 st.sidebar.title("🔧 Navigation")
+st.sidebar.info(f"User ID: {st.session_state.user_id[:8]}...")  # Show first 8 chars of user ID
 page = st.sidebar.radio("Go to:", ["🔑 API Configuration", "🤖 Chatbot", "📄 Instructions", "⚙️ Settings"])
 
 # --- API Configuration Page ---
@@ -38,6 +61,12 @@ if page == "🔑 API Configuration":
     if api_key_input:
         if api_key_input.startswith("sk-"):
             st.session_state.api_key = api_key_input
+            # Reset assistant setup when API key changes
+            st.session_state.assistant_setup_complete = False
+            if "assistant_id" in st.session_state:
+                del st.session_state.assistant_id
+            if "thread_id" in st.session_state:
+                del st.session_state.thread_id
             st.success("✅ API Key saved successfully!")
             st.info("You can now navigate to the Chatbot page to start using the assistant.")
         else:
@@ -48,14 +77,12 @@ if page == "🔑 API Configuration":
         st.markdown("---")
         st.markdown("**Current Status:** 🟢 API Key configured")
         if st.button("Clear API Key"):
-            if "api_key" in st.session_state:
-                del st.session_state.api_key
-            if "assistant_id" in st.session_state:
-                del st.session_state.assistant_id
-            if "thread_id" in st.session_state:
-                del st.session_state.thread_id
-            if "chat_history" in st.session_state:
-                del st.session_state.chat_history
+            # Clear all related session state
+            keys_to_clear = ["api_key", "assistant_id", "thread_id", "assistant_setup_complete"]
+            for key in keys_to_clear:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.session_state.chat_history = []
             st.rerun()
     else:
         st.markdown("---")
@@ -70,23 +97,42 @@ elif page == "⚙️ Settings":
         st.warning("⚠️ Please configure your API key first in the 'API Configuration' page.")
         st.stop()
     
+    # Model selection
+    old_model = st.session_state.model
     st.session_state.model = st.selectbox(
         "Choose the model:", 
         ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"], 
-        index=0 if "model" not in st.session_state else ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"].index(st.session_state.get("model", "gpt-4o"))
+        index=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"].index(st.session_state.model)
     )
+    
+    # If model changed, reset assistant setup
+    if old_model != st.session_state.model:
+        st.session_state.assistant_setup_complete = False
+        if "assistant_id" in st.session_state:
+            del st.session_state.assistant_id
+        if "thread_id" in st.session_state:
+            del st.session_state.thread_id
+    
     st.success(f"Model selected: {st.session_state.model}")
     
     # File path configuration
     st.markdown("---")
     st.subheader("📁 File Configuration")
     
-    default_path = "/Users/maxfade/Desktop/HeadQuarters/GTI Data Base and SOP (1).pdf"
+    old_file_path = st.session_state.file_path
     st.session_state.file_path = st.text_input(
         "PDF File Path:",
-        value=st.session_state.get("file_path", default_path),
+        value=st.session_state.file_path,
         help="Path to your GTI SOP PDF file"
     )
+    
+    # If file path changed, reset assistant setup
+    if old_file_path != st.session_state.file_path:
+        st.session_state.assistant_setup_complete = False
+        if "assistant_id" in st.session_state:
+            del st.session_state.assistant_id
+        if "thread_id" in st.session_state:
+            del st.session_state.thread_id
     
     # Validate file path
     if st.session_state.file_path:
@@ -94,6 +140,17 @@ elif page == "⚙️ Settings":
             st.success("✅ File path is valid")
         else:
             st.error("❌ File not found at the specified path")
+    
+    # Session info
+    st.markdown("---")
+    st.subheader("🔍 Session Information")
+    st.info(f"Your User ID: {st.session_state.user_id}")
+    st.info(f"Chat History: {len(st.session_state.chat_history)} messages")
+    
+    if st.button("🗑️ Clear Chat History"):
+        st.session_state.chat_history = []
+        st.success("Chat history cleared!")
+        st.rerun()
 
 # --- Instructions Page ---
 elif page == "📄 Instructions":
@@ -118,6 +175,11 @@ elif page == "📄 Instructions":
     - ⚠️ Critical info
 
     The AI will pull data **only** from your uploaded SOP document.
+    
+    #### 🔄 Multi-User Support:
+    - Each user gets their own unique session and chat history
+    - Your conversations are private to your session
+    - You can clear your chat history in the Settings page
     """)
 
 # --- Chat Page ---
@@ -130,22 +192,28 @@ elif page == "🤖 Chatbot":
         st.stop()
 
     # Initialize OpenAI client
-    client = OpenAI(api_key=st.session_state.api_key)
+    try:
+        client = OpenAI(api_key=st.session_state.api_key)
+    except Exception as e:
+        st.error(f"❌ Error initializing OpenAI client: {str(e)}")
+        st.info("Please check your API key in the 'API Configuration' page.")
+        st.stop()
 
-    # --- Initial Setup ---
-    if "assistant_id" not in st.session_state:
+    # --- Assistant Setup ---
+    if not st.session_state.assistant_setup_complete:
         try:
-            with st.spinner("Setting up assistant..."):
+            with st.spinner("Setting up your personal assistant..."):
+                # Create assistant
                 assistant = client.beta.assistants.create(
-                    name="SOP Sales Coordinator",
+                    name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
                     instructions="You are a helpful assistant that helps the Sales Ops team at GTI follow SOPs by State and Order Type (Rise vs General). Answer questions based only on the provided SOP document. Format your responses with clear indicators for allowed/not allowed actions, tips, and critical information using emojis and markdown formatting.",
-                    model=st.session_state.get("model", "gpt-4o"),
+                    model=st.session_state.model,
                     tools=[{"type": "file_search"}]
                 )
                 st.session_state.assistant_id = assistant.id
 
                 # Upload file and set up vector store
-                file_path = st.session_state.get("file_path", "GTI Data Base and SOP (1).pdf")
+                file_path = st.session_state.file_path
                 
                 if not os.path.exists(file_path):
                     st.error(f"❌ File not found: {file_path}")
@@ -156,7 +224,9 @@ elif page == "🤖 Chatbot":
                     file=open(file_path, "rb"),
                     purpose="assistants"
                 )
-                vector_store = client.vector_stores.create(name="SOP Vector Store")
+                vector_store = client.vector_stores.create(
+                    name=f"SOP Vector Store - {st.session_state.user_id[:8]}"
+                )
                 client.vector_stores.file_batches.create_and_poll(
                     vector_store_id=vector_store.id,
                     file_ids=[file_response.id]
@@ -166,20 +236,23 @@ elif page == "🤖 Chatbot":
                     tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}}
                 )
 
+                # Create thread for this user
                 thread = client.beta.threads.create()
                 st.session_state.thread_id = thread.id
-                st.session_state.chat_history = []
+                st.session_state.assistant_setup_complete = True
+                
+                st.success("✅ Assistant setup complete!")
                 
         except Exception as e:
             st.error(f"❌ Error setting up assistant: {str(e)}")
-            st.info("Please check your API key and try again.")
+            st.info("Please check your API key and file path, then try again.")
             st.stop()
 
     # --- Chat Interface ---
     st.subheader("💬 Ask a question about GTI SOPs")
     
     # Display chat history
-    for idx, chat in enumerate(st.session_state.get("chat_history", [])):
+    for idx, chat in enumerate(st.session_state.chat_history):
         with st.chat_message("user"):
             st.markdown(chat["user"])
         with st.chat_message("assistant"):
@@ -188,18 +261,27 @@ elif page == "🤖 Chatbot":
     # --- Input Field at Bottom ---
     user_input = st.chat_input("Ask your question here...")
     if user_input:
+        # Ensure we have all required session state variables
+        if "thread_id" not in st.session_state or "assistant_id" not in st.session_state:
+            st.error("❌ Session state error. Please refresh the page and try again.")
+            st.stop()
+            
         try:
             with st.spinner("Fetching answer..."):
+                # Add user message to thread
                 client.beta.threads.messages.create(
                     thread_id=st.session_state.thread_id,
                     role="user",
                     content=user_input
                 )
+                
+                # Create run
                 run = client.beta.threads.runs.create(
                     thread_id=st.session_state.thread_id,
                     assistant_id=st.session_state.assistant_id
                 )
 
+                # Wait for completion
                 while True:
                     run_status = client.beta.threads.runs.retrieve(
                         thread_id=st.session_state.thread_id,
@@ -209,6 +291,7 @@ elif page == "🤖 Chatbot":
                         break
                     time.sleep(1)
 
+                # Get assistant response
                 messages = client.beta.threads.messages.list(thread_id=st.session_state.thread_id)
                 assistant_reply = ""
                 for msg in messages.data:
@@ -216,13 +299,13 @@ elif page == "🤖 Chatbot":
                         assistant_reply = msg.content[0].text.value
                         break
 
-                # Save conversation
+                # Save conversation to session history
                 st.session_state.chat_history.append({
                     "user": user_input,
                     "assistant": assistant_reply
                 })
 
-                # Show assistant reply
+                # Display the new messages
                 with st.chat_message("user"):
                     st.markdown(user_input)
                 with st.chat_message("assistant"):
@@ -231,3 +314,12 @@ elif page == "🤖 Chatbot":
         except Exception as e:
             st.error(f"❌ Error processing your request: {str(e)}")
             st.info("Please check your API key and try again.")
+            
+            # If there's an error, we might need to reset the assistant setup
+            if "invalid" in str(e).lower() or "not found" in str(e).lower():
+                st.session_state.assistant_setup_complete = False
+                if "assistant_id" in st.session_state:
+                    del st.session_state.assistant_id
+                if "thread_id" in st.session_state:
+                    del st.session_state.thread_id
+                st.info("Assistant setup has been reset. Please try again.")
