@@ -107,7 +107,6 @@ elif page == "⚙️ Settings":
     "Choose the model:", 
     ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"], 
     index=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"].index(st.session_state.model)
-)
 
     # If model changed, reset assistant setup
     if old_model != st.session_state.model:
