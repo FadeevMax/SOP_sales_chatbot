@@ -108,9 +108,52 @@ elif page == "⚙️ Settings":
     ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"], 
     index=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"].index(st.session_state.model)
 
-    # If model changed, reset assistant setup
+      # If model changed, reset assistant setup
     if old_model != st.session_state.model:
-@@ -155,171 +155,201 @@
+        st.session_state.assistant_setup_complete = False
+        if "assistant_id" in st.session_state:
+            del st.session_state.assistant_id
+        if "thread_id" in st.session_state:
+            del st.session_state.thread_id
+    
+    st.success(f"Model selected: {st.session_state.model}")
+    
+    # File path configuration
+    st.markdown("---")
+    st.subheader("📁 File Configuration")
+    
+    old_file_path = st.session_state.file_path
+    st.session_state.file_path = st.text_input(
+        "PDF File Path:",
+        value=st.session_state.file_path,
+        help="Path to your GTI SOP PDF file"
+    )
+    
+    # If file path changed, reset assistant setup
+    if old_file_path != st.session_state.file_path:
+        st.session_state.assistant_setup_complete = False
+        if "assistant_id" in st.session_state:
+            del st.session_state.assistant_id
+        if "thread_id" in st.session_state:
+            del st.session_state.thread_id
+    
+    # Validate file path
+    if st.session_state.file_path:
+        if os.path.exists(st.session_state.file_path):
+            st.success("✅ File path is valid")
+        else:
+            st.error("❌ File not found at the specified path")
+    
+    # Session info
+    st.markdown("---")
+    st.subheader("🔍 Session Information")
+    st.info(f"Your User ID: {st.session_state.user_id}")
+    st.info(f"Chat History: {len(st.session_state.chat_history)} messages")
+    
+    if st.button("🗑️ Clear Chat History"):
+        st.session_state.chat_history = []
+        st.success("Chat history cleared!")
+        st.rerun()
 # --- Instructions Page ---
 elif page == "📄 Instructions":
     st.header("📄 How to Use GTI SOP Sales Coordinator")
