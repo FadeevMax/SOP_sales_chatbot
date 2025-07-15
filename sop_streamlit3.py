@@ -36,57 +36,100 @@ page = st.sidebar.radio("Go to:", ["🔑 API Configuration", "🤖 Chatbot", "�
 # --- API Configuration Page ---
 if page == "🔑 API Configuration":
     st.header("🔑 API Configuration")
-    st.markdown("""
-    ### OpenAI API Key Setup
-    Enter your OpenAI API key to use the GTI SOP Sales Coordinator.
     
-    #### How to get your API key:
-    1. Go to [OpenAI Platform](https://platform.openai.com/)
-    2. Sign in to your account
-    3. Navigate to API Keys section
-    4. Create a new API key
-    5. Copy and paste it below
+    # Hardcoded API key (you can also put this in a separate file)
+    HARDCODED_API_KEY = "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"  # Replace with your actual API key
+    ADMIN_PASSWORD = "1111"
     
-    ⚠️ **Important**: Your API key is stored only for this session and is not saved permanently.
-    """)
-    
-    # API Key input
-    api_key_input = st.text_input(
-        "Enter your OpenAI API Key:",
+    # Password input
+    password_input = st.text_input(
+        "Enter Password to Access API Configuration:",
         type="password",
-        placeholder="sk-proj-...",
-        help="Your API key will be used to access OpenAI's services"
+        placeholder="Enter password...",
+        help="Enter the admin password to configure API settings"
     )
     
-    if api_key_input:
-        if api_key_input.startswith("sk-"):
-            st.session_state.api_key = api_key_input
-            # Reset assistant setup when API key changes
-            st.session_state.assistant_setup_complete = False
-            if "assistant_id" in st.session_state:
-                del st.session_state.assistant_id
-            if "thread_id" in st.session_state:
-                del st.session_state.thread_id
-            st.success("✅ API Key saved successfully!")
-            st.info("You can now navigate to the Chatbot page to start using the assistant.")
+    # Check password
+    if password_input == ADMIN_PASSWORD:
+        st.success("✅ Password correct! Access granted.")
+        
+        # Option to use hardcoded key or enter custom key
+        api_option = st.radio(
+            "Choose API Key Option:",
+            ["Use Default API Key", "Enter Custom API Key"]
+        )
+        
+        if api_option == "Use Default API Key":
+            st.info("Using the default API key configured in the system.")
+            if st.button("Use Default API Key"):
+                st.session_state.api_key = HARDCODED_API_KEY
+                # Reset assistant setup when API key changes
+                st.session_state.assistant_setup_complete = False
+                if "assistant_id" in st.session_state:
+                    del st.session_state.assistant_id
+                if "thread_id" in st.session_state:
+                    del st.session_state.thread_id
+                st.success("✅ Default API Key configured successfully!")
+                st.info("You can now navigate to the Chatbot page to start using the assistant.")
+        
+        else:  # Enter Custom API Key
+            st.markdown("""
+            ### Custom OpenAI API Key Setup
+            Enter your own OpenAI API key to use the GTI SOP Sales Coordinator.
+            
+            #### How to get your API key:
+            1. Go to [OpenAI Platform](https://platform.openai.com/)
+            2. Sign in to your account
+            3. Navigate to API Keys section
+            4. Create a new API key
+            5. Copy and paste it below
+            
+            ⚠️ **Important**: Your API key is stored only for this session and is not saved permanently.
+            """)
+            
+            # API Key input
+            api_key_input = st.text_input(
+                "Enter your OpenAI API Key:",
+                type="password",
+                placeholder="sk-proj-...",
+                help="Your API key will be used to access OpenAI's services"
+            )
+            
+            if api_key_input:
+                if api_key_input.startswith("sk-"):
+                    st.session_state.api_key = api_key_input
+                    # Reset assistant setup when API key changes
+                    st.session_state.assistant_setup_complete = False
+                    if "assistant_id" in st.session_state:
+                        del st.session_state.assistant_id
+                    if "thread_id" in st.session_state:
+                        del st.session_state.thread_id
+                    st.success("✅ Custom API Key saved successfully!")
+                    st.info("You can now navigate to the Chatbot page to start using the assistant.")
+                else:
+                    st.error("❌ Invalid API key format. OpenAI API keys should start with 'sk-'")
+        
+        # Show current status
+        if "api_key" in st.session_state:
+            st.markdown("---")
+            st.markdown("**Current Status:** 🟢 API Key configured")
+            if st.button("Clear API Key"):
+                # Clear all related session state
+                keys_to_clear = ["api_key", "assistant_id", "thread_id", "assistant_setup_complete"]
+                for key in keys_to_clear:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.session_state.chat_history = []
+                st.rerun()
         else:
-            st.error("❌ Invalid API key format. OpenAI API keys should start with 'sk-'")
+            st.markdown("---")
+            st.markdown("**Current Status:** 🔴 No API Key configured")
     
-    # Show current status
-    if "api_key" in st.session_state:
-        st.markdown("---")
-        st.markdown("**Current Status:** 🟢 API Key configured")
-        if st.button("Clear API Key"):
-            # Clear all related session state
-            keys_to_clear = ["api_key", "assistant_id", "thread_id", "assistant_setup_complete"]
-            for key in keys_to_clear:
-                if key in st.session_state:
-                    del st.session_state[key]
-            st.session_state.chat_history = []
-            st.rerun()
+    elif password_input:
+        st.error("❌ Incorrect password. Access denied.")
+    
     else:
-        st.markdown("---")
-        st.markdown("**Current Status:** 🔴 No API Key configured")
+        st.info("Please enter the password to access API configuration.")
 
 # --- Settings Page ---
 elif page == "⚙️ Settings":
