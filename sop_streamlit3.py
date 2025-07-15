@@ -12,16 +12,16 @@ def initialize_session_state():
     """Initialize all required session state variables"""
     if "user_id" not in st.session_state:
         st.session_state.user_id = str(uuid.uuid4())
-    
+
     if "model" not in st.session_state:
         st.session_state.model = "gpt-4o"
-    
+
     if "file_path" not in st.session_state:
         st.session_state.file_path = "GTI Data Base and SOP (1).pdf"
-    
+
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
-    
+
     if "assistant_setup_complete" not in st.session_state:
         st.session_state.assistant_setup_complete = False
 
@@ -49,7 +49,7 @@ if page == "🔑 API Configuration":
     
     ⚠️ **Important**: Your API key is stored only for this session and is not saved permanently.
     """)
-    
+
     # API Key input
     api_key_input = st.text_input(
         "Enter your OpenAI API Key:",
@@ -57,7 +57,7 @@ if page == "🔑 API Configuration":
         placeholder="sk-proj-...",
         help="Your API key will be used to access OpenAI's services"
     )
-    
+
     if api_key_input:
         if api_key_input.startswith("sk-"):
             st.session_state.api_key = api_key_input
@@ -71,7 +71,7 @@ if page == "🔑 API Configuration":
             st.info("You can now navigate to the Chatbot page to start using the assistant.")
         else:
             st.error("❌ Invalid API key format. OpenAI API keys should start with 'sk-'")
-    
+
     # Show current status
     if "api_key" in st.session_state:
         st.markdown("---")
@@ -91,67 +91,27 @@ if page == "🔑 API Configuration":
 # --- Settings Page ---
 elif page == "⚙️ Settings":
     st.header("⚙️ Settings")
-    
+
     # Check if API key is configured
     if "api_key" not in st.session_state:
         st.warning("⚠️ Please configure your API key first in the 'API Configuration' page.")
         st.stop()
-    
+
     # Model selection
     old_model = st.session_state.model
     st.session_state.model = st.selectbox(
+        "Choose the model:", 
+        ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"], 
+        index=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"].index(st.session_state.model)
+    )
     "Choose the model:", 
     ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"], 
     index=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"].index(st.session_state.model)
 )
-    
+
     # If model changed, reset assistant setup
     if old_model != st.session_state.model:
-        st.session_state.assistant_setup_complete = False
-        if "assistant_id" in st.session_state:
-            del st.session_state.assistant_id
-        if "thread_id" in st.session_state:
-            del st.session_state.thread_id
-    
-    st.success(f"Model selected: {st.session_state.model}")
-    
-    # File path configuration
-    st.markdown("---")
-    st.subheader("📁 File Configuration")
-    
-    old_file_path = st.session_state.file_path
-    st.session_state.file_path = st.text_input(
-        "PDF File Path:",
-        value=st.session_state.file_path,
-        help="Path to your GTI SOP PDF file"
-    )
-    
-    # If file path changed, reset assistant setup
-    if old_file_path != st.session_state.file_path:
-        st.session_state.assistant_setup_complete = False
-        if "assistant_id" in st.session_state:
-            del st.session_state.assistant_id
-        if "thread_id" in st.session_state:
-            del st.session_state.thread_id
-    
-    # Validate file path
-    if st.session_state.file_path:
-        if os.path.exists(st.session_state.file_path):
-            st.success("✅ File path is valid")
-        else:
-            st.error("❌ File not found at the specified path")
-    
-    # Session info
-    st.markdown("---")
-    st.subheader("🔍 Session Information")
-    st.info(f"Your User ID: {st.session_state.user_id}")
-    st.info(f"Chat History: {len(st.session_state.chat_history)} messages")
-    
-    if st.button("🗑️ Clear Chat History"):
-        st.session_state.chat_history = []
-        st.success("Chat history cleared!")
-        st.rerun()
-
+@@ -155,171 +155,201 @@
 # --- Instructions Page ---
 elif page == "📄 Instructions":
     st.header("📄 How to Use GTI SOP Sales Coordinator")
@@ -210,7 +170,6 @@ However, there are several key conditions and rules you must follow for both **G
 * **Loose Units:** You can add loose units if a full case is not available. [cite: 2] For Western and Moco accounts, you should prioritize using loose units. [cite: 2]
 * **Flower Page:** Always confirm if you should add the flower page from an order. [cite: 2]
 * **Limited Availability:** If an item has limited stock (e.g., request for 25, only 11 available), you can add the available amount as long as it's **9 units or more**. [cite: 2] If it's less than 9, do not add it. [cite: 2]""")
-    
 
 # --- Chat Page ---
 elif page == "🤖 Chatbot":
@@ -244,7 +203,7 @@ elif page == "🤖 Chatbot":
 
                 # Upload file and set up vector store
                 file_path = st.session_state.file_path
-                
+
                 if not os.path.exists(file_path):
                     st.error(f"❌ File not found: {file_path}")
                     st.info("Please check your file path in the Settings page.")
@@ -270,9 +229,9 @@ elif page == "🤖 Chatbot":
                 thread = client.beta.threads.create()
                 st.session_state.thread_id = thread.id
                 st.session_state.assistant_setup_complete = True
-                
+
                 st.success("✅ Assistant setup complete!")
-                
+
         except Exception as e:
             st.error(f"❌ Error setting up assistant: {str(e)}")
             st.info("Please check your API key and file path, then try again.")
@@ -280,7 +239,7 @@ elif page == "🤖 Chatbot":
 
     # --- Chat Interface ---
     st.subheader("💬 Ask a question about GTI SOPs")
-    
+
     # Display chat history
     for idx, chat in enumerate(st.session_state.chat_history):
         with st.chat_message("user"):
@@ -295,7 +254,7 @@ elif page == "🤖 Chatbot":
         if "thread_id" not in st.session_state or "assistant_id" not in st.session_state:
             st.error("❌ Session state error. Please refresh the page and try again.")
             st.stop()
-            
+
         try:
             with st.spinner("Fetching answer..."):
                 # Add user message to thread
@@ -304,7 +263,7 @@ elif page == "🤖 Chatbot":
                     role="user",
                     content=user_input
                 )
-                
+
                 # Create run
                 run = client.beta.threads.runs.create(
                     thread_id=st.session_state.thread_id,
@@ -340,11 +299,11 @@ elif page == "🤖 Chatbot":
                     st.markdown(user_input)
                 with st.chat_message("assistant"):
                     st.markdown(assistant_reply)
-                    
+
         except Exception as e:
             st.error(f"❌ Error processing your request: {str(e)}")
             st.info("Please check your API key and try again.")
-            
+
             # If there's an error, we might need to reset the assistant setup
             if "invalid" in str(e).lower() or "not found" in str(e).lower():
                 st.session_state.assistant_setup_complete = False
