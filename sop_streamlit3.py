@@ -145,7 +145,7 @@ elif page == "🤖 Chatbot":
                 st.session_state.assistant_id = assistant.id
 
                 # Upload file and set up vector store
-                file_path = st.session_state.get("file_path", "/Users/maxfade/Desktop/HeadQuarters/GTI Data Base and SOP (1).pdf")
+                file_path = st.session_state.get("file_path", "GTI Data Base and SOP (1).pdf")
                 
                 if not os.path.exists(file_path):
                     st.error(f"❌ File not found: {file_path}")
