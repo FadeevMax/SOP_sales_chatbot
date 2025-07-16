@@ -95,12 +95,12 @@ if not st.session_state.authenticated:
             st.session_state.api_key = st.secrets["openai_key"]
             st.session_state.authenticated = True
             st.success("✅ Correct password—welcome!")
-            st.experimental_rerun()
+            st.rerun()
         elif pwd.startswith("sk-"):
             st.session_state.api_key = pwd
             st.session_state.authenticated = True
             st.success("✅ API key accepted!")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("❌ Incorrect password or API key.")
     st.stop()
@@ -148,7 +148,7 @@ if page == "📄 Instructions":
                     st.session_state.instructions = DEFAULT_INSTRUCTIONS
                     st.session_state.assistant_setup_complete = False
                 st.success(f"✅ '{selected_instruction}' deleted.")
-                st.experimental_rerun()
+                st.rerun()
         
         with col3:
             if st.button("🔄 Reset to Default") and selected_instruction == "Default":
@@ -157,7 +157,7 @@ if page == "📄 Instructions":
                     st.session_state.instructions = DEFAULT_INSTRUCTIONS
                     st.session_state.assistant_setup_complete = False
                 st.success("✅ Reset to default instructions.")
-                st.experimental_rerun()
+                st.rerun()
     
     # Create new instruction
     st.markdown("---")
@@ -170,7 +170,7 @@ if page == "📄 Instructions":
             if new_instruction_name not in st.session_state.custom_instructions:
                 st.session_state.custom_instructions[new_instruction_name] = new_instruction_content
                 st.success(f"✅ New instruction '{new_instruction_name}' created.")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("❌ Instruction name already exists.")
         else:
@@ -250,7 +250,7 @@ elif page == "🤖 Chatbot":
                 st.session_state.threads.append(new_thread)
                 st.session_state.thread_id = thread.id
                 st.success("✅ New thread created with updated settings!")
-                st.experimental_rerun()
+                st.rerun()
             except Exception as e:
                 st.error(f"❌ Error creating new thread: {str(e)}")
     else:
@@ -349,7 +349,7 @@ elif page == "🤖 Chatbot":
         }
         st.session_state.threads.append(new_thread)
         st.session_state.thread_id = thread.id
-        st.experimental_rerun()
+        st.rerun()
 
     # --- Chat Display and Input ---
     st.subheader("💬 Ask your question about the GTI SOP")
