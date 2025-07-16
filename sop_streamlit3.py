@@ -275,8 +275,43 @@ def run_main_app():
 
     elif page == "⚙️ Settings":
         st.header("⚙️ Settings")
-        st.info("File configuration is now managed automatically via Google Docs.")
         st.markdown("---")
+
+        # --- NEW: Section to View/Download the Live SOP PDF ---
+        st.subheader("📄 View Live SOP Document")
+        st.info(
+            "This section allows you to download the exact PDF version of the SOP that the AI is currently using. "
+            "The file is automatically updated from Google Docs and cached for 10 minutes."
+        )
+
+        # We call our existing caching function to get the path to the PDF.
+        # This will either trigger a new download or use the fresh cached version.
+        pdf_path = get_live_sop_pdf_path(GOOGLE_DOC_NAME)
+
+        # Check if the file was successfully created/retrieved
+        if pdf_path and os.path.exists(pdf_path):
+            # Display the last modified time to the user
+            last_modified_time = os.path.getmtime(pdf_path)
+            last_modified_dt = datetime.fromtimestamp(last_modified_time)
+            st.write(f"SOP last updated: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
+
+            # Read the PDF file's content in binary mode
+            with open(pdf_path, "rb") as pdf_file:
+                pdf_bytes = pdf_file.read()
+
+            # Create the download button
+            st.download_button(
+                label="⬇️ Download Live SOP as PDF",
+                data=pdf_bytes,
+                file_name="Live_GTI_SOP.pdf",
+                mime="application/pdf"
+            )
+        else:
+            st.warning("Could not retrieve the SOP PDF. Please check the logs for errors.")
+
+        st.markdown("---")
+
+        # --- Existing "Clear Threads" functionality ---
         st.subheader("🧹 Clear Threads")
         if st.button("🗑️ Clear All Threads & Conversations"):
             st.session_state.threads = []
