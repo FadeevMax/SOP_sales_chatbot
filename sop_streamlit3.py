@@ -90,12 +90,12 @@ if not st.session_state.authenticated:
             st.session_state.api_key = st.secrets["openai_key"]
             st.session_state.authenticated = True
             st.success("✅ Correct password—welcome!")
-            st.experimental_rerun()
+            st.rerun()
         elif pwd.startswith("sk-"):
             st.session_state.api_key = pwd
             st.session_state.authenticated = True
             st.success("✅ API key accepted!")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("❌ Incorrect password or API key.")
     st.stop()
@@ -223,7 +223,7 @@ elif page == "🤖 Chatbot":
         }
         st.session_state.threads.append(new_thread)
         st.session_state.thread_id = thread.id
-        st.experimental_rerun()
+        st.rerun()
 
     # --- Chat Display and Input ---
     st.subheader("💬 Ask your question about the GTI SOP")
