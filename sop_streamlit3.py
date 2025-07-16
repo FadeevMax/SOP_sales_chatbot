@@ -5,7 +5,7 @@ import os
 import uuid
 from datetime import datetime
 import json
-from streamlit_local_storage import LocalStorage # <-- Import the library
+from streamlit_local_storage import LocalStorage
 
 # --- Constants & Configuration ---
 DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
@@ -68,7 +68,6 @@ STATE_DIR = "user_data"
 # --- Functions for User and State Management ---
 
 def get_persistent_user_id(local_storage: LocalStorage) -> str:
-    """Retrieves the user_id from local storage, or creates a new one."""
     user_id = local_storage.getItem("user_id")
     if user_id is None:
         user_id = str(uuid.uuid4())
@@ -76,13 +75,11 @@ def get_persistent_user_id(local_storage: LocalStorage) -> str:
     return user_id
 
 def get_user_state_filepath(user_id: str) -> str:
-    """Returns the path to the user's specific state file."""
     if not os.path.exists(STATE_DIR):
         os.makedirs(STATE_DIR)
     return os.path.join(STATE_DIR, f"state_{user_id}.json")
 
 def save_app_state(user_id: str):
-    """Saves the relevant session state to a user-specific JSON file."""
     if "user_id" not in st.session_state:
         return
     state_to_save = {
@@ -96,7 +93,6 @@ def save_app_state(user_id: str):
         json.dump(state_to_save, f, indent=4)
 
 def load_app_state(user_id: str):
-    """Loads the session state from a user-specific JSON file if it exists."""
     filepath = get_user_state_filepath(user_id)
     if os.path.exists(filepath):
         with open(filepath, "r") as f:
@@ -138,6 +134,224 @@ def initialize_session_state():
     if "instruction_edit_mode" not in st.session_state:
         st.session_state.instruction_edit_mode = "view"
 
+# ======================================================================
+# --- NEW: Main Application Function ---
+# ======================================================================
+def run_main_app():
+    """
+    This function contains the entire UI and logic for the application
+    after the user has successfully logged in.
+    """
+    st.sidebar.title("🔧 Navigation")
+    st.sidebar.info(f"User ID: {st.session_state.user_id[:8]}...")
+    page = st.sidebar.radio("Go to:", ["🤖 Chatbot", "📄 Instructions", "⚙️ Settings"])
+
+    if page == "📄 Instructions":
+        st.header("📄 Chatbot Instructions Manager")
+
+        if st.session_state.instruction_edit_mode == "create":
+            st.subheader("➕ Create New Instruction")
+            with st.form("new_instruction_form"):
+                new_name = st.text_input("Instruction Name:")
+                new_content = st.text_area("Instruction Content:", height=300)
+                submitted = st.form_submit_button("💾 Save New Instruction")
+                if submitted:
+                    if new_name and new_content:
+                        if new_name not in st.session_state.custom_instructions:
+                            st.session_state.custom_instructions[new_name] = new_content
+                            st.session_state.current_instruction_name = new_name
+                            st.session_state.instruction_edit_mode = "view"
+                            st.session_state.assistant_setup_complete = False
+                            save_app_state(st.session_state.user_id)
+                            st.success(f"✅ Instruction '{new_name}' saved.")
+                            st.rerun()
+                        else:
+                            st.error("❌ An instruction with this name already exists.")
+                    else:
+                        st.error("❌ Please provide both a name and content.")
+            if st.button("✖️ Cancel"):
+                st.session_state.instruction_edit_mode = "view"
+                st.rerun()
+        else:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                instruction_names = list(st.session_state.custom_instructions.keys())
+                if st.session_state.current_instruction_name not in instruction_names:
+                    st.session_state.current_instruction_name = "Default"
+                selected_instruction = st.selectbox(
+                    "Select instruction to view or edit:",
+                    instruction_names,
+                    index=instruction_names.index(st.session_state.current_instruction_name)
+                )
+                st.session_state.current_instruction_name = selected_instruction
+            with col2:
+                st.write("")
+                st.write("")
+                if st.button("➕ Create New Instruction"):
+                    st.session_state.instruction_edit_mode = "create"
+                    st.rerun()
+
+            st.subheader(f"Editing: '{selected_instruction}'")
+            is_default = selected_instruction == "Default"
+            instruction_content = st.text_area(
+                "Instruction Content:",
+                value=st.session_state.custom_instructions[selected_instruction],
+                height=320,
+                disabled=is_default,
+                key=f"editor_{selected_instruction}"
+            )
+            if not is_default:
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("💾 Save Changes"):
+                        st.session_state.custom_instructions[selected_instruction] = instruction_content
+                        st.session_state.instructions = instruction_content
+                        st.session_state.assistant_setup_complete = False
+                        save_app_state(st.session_state.user_id)
+                        st.success(f"✅ '{selected_instruction}' instructions saved.")
+                with c2:
+                    if st.button("🗑️ Delete Instruction"):
+                        del st.session_state.custom_instructions[selected_instruction]
+                        st.session_state.current_instruction_name = "Default"
+                        st.session_state.instructions = DEFAULT_INSTRUCTIONS
+                        st.session_state.assistant_setup_complete = False
+                        save_app_state(st.session_state.user_id)
+                        st.success(f"✅ '{selected_instruction}' deleted.")
+                        st.rerun()
+            else:
+                st.info("ℹ️ The 'Default' instruction cannot be edited or deleted.")
+
+    elif page == "⚙️ Settings":
+        st.header("⚙️ Settings")
+        st.markdown("---")
+        st.subheader("📁 File Configuration")
+        old_file_path = st.session_state.file_path
+        st.session_state.file_path = st.text_input("PDF File Path:", value=st.session_state.file_path)
+        if old_file_path != st.session_state.file_path:
+            st.session_state.assistant_setup_complete = False
+            st.session_state.threads = []
+            save_app_state(st.session_state.user_id)
+            st.warning("⚠️ File path changed. All threads have been cleared.")
+
+        if st.session_state.file_path and os.path.exists(st.session_state.file_path):
+            st.success("✅ File path is valid")
+        else:
+            st.error("❌ File not found at the specified path")
+
+        st.markdown("---")
+        st.subheader("🧹 Clear Threads")
+        if st.button("🗑️ Clear All Threads & Conversations"):
+            st.session_state.threads = []
+            st.session_state.assistant_setup_complete = False
+            save_app_state(st.session_state.user_id)
+            st.success("✅ All threads cleared.")
+
+    elif page == "🤖 Chatbot":
+        st.title("🤖 GTI SOP Sales Coordinator")
+        col1, col2 = st.columns(2)
+        with col1:
+            models = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"]
+            old_model = st.session_state.model
+            new_model = st.selectbox("Choose model:", models, index=models.index(old_model))
+        with col2:
+            instruction_names = list(st.session_state.custom_instructions.keys())
+            old_instruction = st.session_state.current_instruction_name
+            new_instruction = st.selectbox("Choose instructions:", instruction_names, index=instruction_names.index(old_instruction))
+
+        settings_changed = (old_model != new_model) or (old_instruction != new_instruction)
+        if settings_changed:
+            st.warning("⚠️ Settings changed. You need to start a new thread to apply these changes.")
+            if st.button("🆕 Start New Thread with New Settings"):
+                st.session_state.model = new_model
+                st.session_state.current_instruction_name = new_instruction
+                st.session_state.instructions = st.session_state.custom_instructions[new_instruction]
+                st.session_state.assistant_setup_complete = False
+                client = OpenAI(api_key=st.session_state.api_key)
+                thread = client.beta.threads.create()
+                new_thread_obj = {"thread_id": thread.id, "messages": [], "start_time": datetime.now().isoformat(), "model": new_model, "instruction_name": new_instruction}
+                st.session_state.threads.append(new_thread_obj)
+                st.session_state.thread_id = thread.id
+                save_app_state(st.session_state.user_id)
+                st.success("✅ New thread created with updated settings!")
+                st.rerun()
+        else:
+            st.session_state.model = new_model
+            st.session_state.current_instruction_name = new_instruction
+            st.session_state.instructions = st.session_state.custom_instructions[new_instruction]
+
+        if not st.session_state.get('assistant_setup_complete', False):
+            try:
+                with st.spinner("Setting up your AI assistant..."):
+                    client = OpenAI(api_key=st.session_state.api_key)
+                    assistant = client.beta.assistants.create(name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}", instructions=st.session_state.instructions, model=st.session_state.model, tools=[{"type": "file_search"}])
+                    st.session_state.assistant_id = assistant.id
+                    if not os.path.exists(st.session_state.file_path):
+                        st.error(f"❌ File not found: {st.session_state.file_path}")
+                        st.stop()
+                    file_response = client.files.create(file=open(st.session_state.file_path, "rb"), purpose="assistants")
+                    vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
+                    client.vector_stores.file_batches.create_and_poll(vector_store_id=vector_store.id, file_ids=[file_response.id])
+                    client.beta.assistants.update(assistant_id=assistant.id, tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}})
+                    if not st.session_state.threads:
+                        thread = client.beta.threads.create()
+                        st.session_state.threads.append({"thread_id": thread.id, "messages": [], "start_time": datetime.now().isoformat(), "model": st.session_state.model, "instruction_name": st.session_state.current_instruction_name})
+                        st.session_state.thread_id = thread.id
+                        save_app_state(st.session_state.user_id)
+                    st.session_state.assistant_setup_complete = True
+                    st.success("✅ Assistant is ready!")
+            except Exception as e:
+                st.error(f"❌ Error setting up assistant: {str(e)}")
+                st.stop()
+
+        client = OpenAI(api_key=st.session_state.api_key)
+        st.sidebar.subheader("🧵 Your Threads")
+        thread_options = [f"{i+1}: {t['start_time'].split('T')[0]} | {t.get('model', 'N/A')} | {t.get('instruction_name', 'N/A')}" for i, t in enumerate(st.session_state.threads)]
+        thread_ids = [t['thread_id'] for t in st.session_state.threads]
+        selected_thread_info = None
+        if thread_options:
+            current_idx = thread_ids.index(st.session_state.thread_id) if 'thread_id' in st.session_state and st.session_state.thread_id in thread_ids else 0
+            selected_idx = st.sidebar.selectbox("Select Thread", range(len(thread_options)), format_func=lambda x: thread_options[x], index=current_idx)
+            selected_thread_info = st.session_state.threads[selected_idx]
+            st.session_state.thread_id = selected_thread_info['thread_id']
+
+        if st.sidebar.button("➕ Start New Thread"):
+            thread = client.beta.threads.create()
+            new_thread_obj = {"thread_id": thread.id, "messages": [], "start_time": datetime.now().isoformat(), "model": st.session_state.model, "instruction_name": st.session_state.current_instruction_name}
+            st.session_state.threads.append(new_thread_obj)
+            st.session_state.thread_id = thread.id
+            save_app_state(st.session_state.user_id)
+            st.rerun()
+
+        st.subheader("💬 Ask your question about the GTI SOP")
+        if selected_thread_info:
+            st.info(f"🔧 Current: {selected_thread_info.get('model', 'unknown')} | {selected_thread_info.get('instruction_name', 'unknown')}")
+            for msg in selected_thread_info['messages']:
+                with st.chat_message("user"): st.markdown(msg["user"])
+                with st.chat_message("assistant"): st.markdown(msg["assistant"])
+
+            user_input = st.chat_input("Ask your question here...")
+            if user_input:
+                try:
+                    selected_thread_info["messages"].append({"user": user_input, "assistant": ""})
+                    with st.chat_message("user"): st.markdown(user_input)
+                    client.beta.threads.messages.create(thread_id=selected_thread_info["thread_id"], role="user", content=user_input)
+                    run = client.beta.threads.runs.create_and_poll(thread_id=selected_thread_info["thread_id"], assistant_id=st.session_state.assistant_id)
+                    if run.status == 'completed':
+                        messages = client.beta.threads.messages.list(thread_id=selected_thread_info["thread_id"])
+                        assistant_reply = next((m.content[0].text.value for m in messages.data if m.role == "assistant"), "Sorry, I couldn't get a response.")
+                        selected_thread_info["messages"][-1]["assistant"] = assistant_reply
+                        with st.chat_message("assistant"): st.markdown(assistant_reply)
+                        save_app_state(st.session_state.user_id)
+                    else:
+                        st.error(f"❌ Run failed with status: {run.status}")
+                        selected_thread_info["messages"].pop()
+                except Exception as e:
+                    st.error(f"❌ Error processing your request: {str(e)}")
+                    st.session_state.assistant_setup_complete = False
+                    if selected_thread_info["messages"]: selected_thread_info["messages"].pop()
+        else:
+            st.info("Start a new thread to begin chatting.")
+
 
 # ======================================================================
 # --- SCRIPT EXECUTION STARTS HERE ---
@@ -147,12 +361,12 @@ localS = LocalStorage()
 user_id = get_persistent_user_id(localS)
 st.session_state.user_id = user_id
 
-# !! CRITICAL FIX !! Initialize the session state *before* checking it.
 initialize_session_state()
 
-# --- Authentication Gate ---
-st.title("🔐 GTI SOP Sales Coordinator Login")
+# --- Main App Router ---
 if not st.session_state.authenticated:
+    # --- Show Login Page ---
+    st.title("🔐 GTI SOP Sales Coordinator Login")
     pwd = st.text_input("Enter password or full API key:", type="password")
     if st.button("Submit"):
         if pwd == "111":
@@ -172,216 +386,8 @@ if not st.session_state.authenticated:
             st.rerun()
         else:
             st.error("❌ Incorrect password or API key.")
+    # Stop the script here to prevent the main app from running
     st.stop()
-
-# --- The rest of the app runs only after authentication ---
-
-st.sidebar.title("🔧 Navigation")
-st.sidebar.info(f"User ID: {st.session_state.user_id[:8]}...")
-page = st.sidebar.radio("Go to:", ["🤖 Chatbot", "📄 Instructions", "⚙️ Settings"])
-
-if page == "📄 Instructions":
-    st.header("📄 Chatbot Instructions Manager")
-
-    if st.session_state.instruction_edit_mode == "create":
-        st.subheader("➕ Create New Instruction")
-        with st.form("new_instruction_form"):
-            new_name = st.text_input("Instruction Name:")
-            new_content = st.text_area("Instruction Content:", height=300)
-            submitted = st.form_submit_button("💾 Save New Instruction")
-            if submitted:
-                if new_name and new_content:
-                    if new_name not in st.session_state.custom_instructions:
-                        st.session_state.custom_instructions[new_name] = new_content
-                        st.session_state.current_instruction_name = new_name
-                        st.session_state.instruction_edit_mode = "view"
-                        st.session_state.assistant_setup_complete = False
-                        save_app_state(st.session_state.user_id) # CORRECTED
-                        st.success(f"✅ Instruction '{new_name}' saved.")
-                        st.rerun()
-                    else:
-                        st.error("❌ An instruction with this name already exists.")
-                else:
-                    st.error("❌ Please provide both a name and content.")
-        if st.button("✖️ Cancel"):
-            st.session_state.instruction_edit_mode = "view"
-            st.rerun()
-    else:
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            instruction_names = list(st.session_state.custom_instructions.keys())
-            if st.session_state.current_instruction_name not in instruction_names:
-                st.session_state.current_instruction_name = "Default"
-            selected_instruction = st.selectbox(
-                "Select instruction to view or edit:",
-                instruction_names,
-                index=instruction_names.index(st.session_state.current_instruction_name)
-            )
-            st.session_state.current_instruction_name = selected_instruction
-        with col2:
-            st.write("")
-            st.write("")
-            if st.button("➕ Create New Instruction"):
-                st.session_state.instruction_edit_mode = "create"
-                st.rerun()
-
-        st.subheader(f"Editing: '{selected_instruction}'")
-        is_default = selected_instruction == "Default"
-        instruction_content = st.text_area(
-            "Instruction Content:",
-            value=st.session_state.custom_instructions[selected_instruction],
-            height=320,
-            disabled=is_default,
-            key=f"editor_{selected_instruction}"
-        )
-        if not is_default:
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("💾 Save Changes"):
-                    st.session_state.custom_instructions[selected_instruction] = instruction_content
-                    st.session_state.instructions = instruction_content
-                    st.session_state.assistant_setup_complete = False
-                    save_app_state(st.session_state.user_id) # CORRECTED
-                    st.success(f"✅ '{selected_instruction}' instructions saved.")
-            with c2:
-                if st.button("🗑️ Delete Instruction"):
-                    del st.session_state.custom_instructions[selected_instruction]
-                    st.session_state.current_instruction_name = "Default"
-                    st.session_state.instructions = DEFAULT_INSTRUCTIONS
-                    st.session_state.assistant_setup_complete = False
-                    save_app_state(st.session_state.user_id) # CORRECTED
-                    st.success(f"✅ '{selected_instruction}' deleted.")
-                    st.rerun()
-        else:
-            st.info("ℹ️ The 'Default' instruction cannot be edited or deleted.")
-
-elif page == "⚙️ Settings":
-    st.header("⚙️ Settings")
-    st.markdown("---")
-    st.subheader("📁 File Configuration")
-    old_file_path = st.session_state.file_path
-    st.session_state.file_path = st.text_input("PDF File Path:", value=st.session_state.file_path)
-    if old_file_path != st.session_state.file_path:
-        st.session_state.assistant_setup_complete = False
-        st.session_state.threads = []
-        save_app_state(st.session_state.user_id) # CORRECTED
-        st.warning("⚠️ File path changed. All threads have been cleared.")
-
-    if st.session_state.file_path and os.path.exists(st.session_state.file_path):
-        st.success("✅ File path is valid")
-    else:
-        st.error("❌ File not found at the specified path")
-
-    st.markdown("---")
-    st.subheader("🧹 Clear Threads")
-    if st.button("🗑️ Clear All Threads & Conversations"):
-        st.session_state.threads = []
-        st.session_state.assistant_setup_complete = False
-        save_app_state(st.session_state.user_id) # CORRECTED
-        st.success("✅ All threads cleared.")
-
-elif page == "🤖 Chatbot":
-    st.title("🤖 GTI SOP Sales Coordinator")
-    col1, col2 = st.columns(2)
-    with col1:
-        models = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"]
-        old_model = st.session_state.model
-        new_model = st.selectbox("Choose model:", models, index=models.index(old_model))
-    with col2:
-        instruction_names = list(st.session_state.custom_instructions.keys())
-        old_instruction = st.session_state.current_instruction_name
-        new_instruction = st.selectbox("Choose instructions:", instruction_names, index=instruction_names.index(old_instruction))
-
-    settings_changed = (old_model != new_model) or (old_instruction != new_instruction)
-    if settings_changed:
-        st.warning("⚠️ Settings changed. You need to start a new thread to apply these changes.")
-        if st.button("🆕 Start New Thread with New Settings"):
-            st.session_state.model = new_model
-            st.session_state.current_instruction_name = new_instruction
-            st.session_state.instructions = st.session_state.custom_instructions[new_instruction]
-            st.session_state.assistant_setup_complete = False
-            client = OpenAI(api_key=st.session_state.api_key)
-            thread = client.beta.threads.create()
-            new_thread_obj = {"thread_id": thread.id, "messages": [], "start_time": datetime.now().isoformat(), "model": new_model, "instruction_name": new_instruction}
-            st.session_state.threads.append(new_thread_obj)
-            st.session_state.thread_id = thread.id
-            save_app_state(st.session_state.user_id) # CORRECTED
-            st.success("✅ New thread created with updated settings!")
-            st.rerun()
-    else:
-        st.session_state.model = new_model
-        st.session_state.current_instruction_name = new_instruction
-        st.session_state.instructions = st.session_state.custom_instructions[new_instruction]
-
-    if not st.session_state.get('assistant_setup_complete', False):
-        try:
-            with st.spinner("Setting up your AI assistant..."):
-                client = OpenAI(api_key=st.session_state.api_key)
-                assistant = client.beta.assistants.create(name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}", instructions=st.session_state.instructions, model=st.session_state.model, tools=[{"type": "file_search"}])
-                st.session_state.assistant_id = assistant.id
-                if not os.path.exists(st.session_state.file_path):
-                    st.error(f"❌ File not found: {st.session_state.file_path}")
-                    st.stop()
-                file_response = client.files.create(file=open(st.session_state.file_path, "rb"), purpose="assistants")
-                vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
-                client.vector_stores.file_batches.create_and_poll(vector_store_id=vector_store.id, file_ids=[file_response.id])
-                client.beta.assistants.update(assistant_id=assistant.id, tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}})
-                if not st.session_state.threads:
-                    thread = client.beta.threads.create()
-                    st.session_state.threads.append({"thread_id": thread.id, "messages": [], "start_time": datetime.now().isoformat(), "model": st.session_state.model, "instruction_name": st.session_state.current_instruction_name})
-                    st.session_state.thread_id = thread.id
-                    save_app_state(st.session_state.user_id) # CORRECTED
-                st.session_state.assistant_setup_complete = True
-                st.success("✅ Assistant is ready!")
-        except Exception as e:
-            st.error(f"❌ Error setting up assistant: {str(e)}")
-            st.stop()
-
-    client = OpenAI(api_key=st.session_state.api_key)
-    st.sidebar.subheader("🧵 Your Threads")
-    thread_options = [f"{i+1}: {t['start_time'].split('T')[0]} | {t.get('model', 'N/A')} | {t.get('instruction_name', 'N/A')}" for i, t in enumerate(st.session_state.threads)]
-    thread_ids = [t['thread_id'] for t in st.session_state.threads]
-    selected_thread_info = None
-    if thread_options:
-        current_idx = thread_ids.index(st.session_state.thread_id) if 'thread_id' in st.session_state and st.session_state.thread_id in thread_ids else 0
-        selected_idx = st.sidebar.selectbox("Select Thread", range(len(thread_options)), format_func=lambda x: thread_options[x], index=current_idx)
-        selected_thread_info = st.session_state.threads[selected_idx]
-        st.session_state.thread_id = selected_thread_info['thread_id']
-
-    if st.sidebar.button("➕ Start New Thread"):
-        thread = client.beta.threads.create()
-        new_thread_obj = {"thread_id": thread.id, "messages": [], "start_time": datetime.now().isoformat(), "model": st.session_state.model, "instruction_name": st.session_state.current_instruction_name}
-        st.session_state.threads.append(new_thread_obj)
-        st.session_state.thread_id = thread.id
-        save_app_state(st.session_state.user_id) # CORRECTED
-        st.rerun()
-
-    st.subheader("💬 Ask your question about the GTI SOP")
-    if selected_thread_info:
-        st.info(f"🔧 Current: {selected_thread_info.get('model', 'unknown')} | {selected_thread_info.get('instruction_name', 'unknown')}")
-        for msg in selected_thread_info['messages']:
-            with st.chat_message("user"): st.markdown(msg["user"])
-            with st.chat_message("assistant"): st.markdown(msg["assistant"])
-
-        user_input = st.chat_input("Ask your question here...")
-        if user_input:
-            try:
-                selected_thread_info["messages"].append({"user": user_input, "assistant": ""})
-                with st.chat_message("user"): st.markdown(user_input)
-                client.beta.threads.messages.create(thread_id=selected_thread_info["thread_id"], role="user", content=user_input)
-                run = client.beta.threads.runs.create_and_poll(thread_id=selected_thread_info["thread_id"], assistant_id=st.session_state.assistant_id)
-                if run.status == 'completed':
-                    messages = client.beta.threads.messages.list(thread_id=selected_thread_info["thread_id"])
-                    assistant_reply = next((m.content[0].text.value for m in messages.data if m.role == "assistant"), "Sorry, I couldn't get a response.")
-                    selected_thread_info["messages"][-1]["assistant"] = assistant_reply
-                    with st.chat_message("assistant"): st.markdown(assistant_reply)
-                    save_app_state(st.session_state.user_id) # CORRECTED
-                else:
-                    st.error(f"❌ Run failed with status: {run.status}")
-                    selected_thread_info["messages"].pop()
-            except Exception as e:
-                st.error(f"❌ Error processing your request: {str(e)}")
-                st.session_state.assistant_setup_complete = False
-                if selected_thread_info["messages"]: selected_thread_info["messages"].pop()
-    else:
-        st.info("Start a new thread to begin chatting.")
+else:
+    # --- Show Main Application ---
+    run_main_app()
