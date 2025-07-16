@@ -5,6 +5,7 @@ import os
 import uuid
 from datetime import datetime
 import json
+from streamlit_local_storage import LocalStorage # <-- Import the library
 
 # --- Constants & Configuration ---
 DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
@@ -62,53 +63,83 @@ However, there are several key conditions and rules you must follow for both **G
 * **Loose Units:** You can add loose units if a full case is not available. [cite: 2] For Western and Moco accounts, you should prioritize using loose units. [cite: 2]
 * **Flower Page:** Always confirm if you should add the flower page from an order. [cite: 2]
 * **Limited Availability:** If an item has limited stock (e.g., request for 25, only 11 available), you can add the available amount as long as it's **9 units or more**. [cite: 2] If it's less than 9, do not add it. [cite: 2]"""
-STATE_FILE = "app_state.json"
+STATE_DIR = "user_data" # <-- Create a directory to store user files
 
-# --- State Management Functions ---
-def save_app_state():
-    """Saves the relevant session state to a JSON file."""
+# --- Functions for User and State Management ---
+
+def get_persistent_user_id(local_storage: LocalStorage) -> str:
+    """
+    Retrieves the user_id from local storage, or creates a new one.
+    """
+    user_id = local_storage.getItem("user_id")
+    if user_id is None:
+        user_id = str(uuid.uuid4())
+        local_storage.setItem("user_id", user_id)
+    return user_id
+
+def get_user_state_filepath(user_id: str) -> str:
+    """
+    Returns the path to the user's specific state file.
+    """
+    if not os.path.exists(STATE_DIR):
+        os.makedirs(STATE_DIR)
+    return os.path.join(STATE_DIR, f"state_{user_id}.json")
+
+def save_app_state(user_id: str):
+    """Saves the relevant session state to a user-specific JSON file."""
     state_to_save = {
-        "user_id": st.session_state.user_id,
+        "user_id": user_id,
         "custom_instructions": st.session_state.custom_instructions,
         "current_instruction_name": st.session_state.current_instruction_name,
         "threads": st.session_state.threads
     }
-    with open(STATE_FILE, "w") as f:
+    filepath = get_user_state_filepath(user_id)
+    with open(filepath, "w") as f:
         json.dump(state_to_save, f, indent=4)
 
-def load_app_state():
-    """Loads the session state from a JSON file if it exists."""
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
+def load_app_state(user_id: str):
+    """Loads the session state from a user-specific JSON file if it exists."""
+    filepath = get_user_state_filepath(user_id)
+    if os.path.exists(filepath):
+        with open(filepath, "r") as f:
             try:
                 state = json.load(f)
-                st.session_state.user_id = state.get("user_id", str(uuid.uuid4()))
+                # Load the state into the session
                 st.session_state.custom_instructions = state.get("custom_instructions", {"Default": DEFAULT_INSTRUCTIONS})
                 st.session_state.current_instruction_name = state.get("current_instruction_name", "Default")
                 st.session_state.threads = state.get("threads", [])
-                # Ensure Default instructions are always present and up-to-date
                 st.session_state.custom_instructions["Default"] = DEFAULT_INSTRUCTIONS
                 return True
-            except json.JSONDecodeError:
-                return False # File is corrupt, start fresh
+            except (json.JSONDecodeError, KeyError):
+                return False # File is corrupt or malformed
     return False
+
+# --- Main App Logic ---
+
+# Initialize local storage
+localS = LocalStorage()
+
+# Get or create a persistent user ID
+# This is the key step for recognizing the returning user
+user_id = get_persistent_user_id(localS)
+st.session_state.user_id = user_id
+
 
 # --- Session State Initialization ---
 def initialize_session_state():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
+    # Load state only once after authentication
     if st.session_state.authenticated and "state_loaded" not in st.session_state:
-         if load_app_state():
-             st.session_state.state_loaded = True
-         else:
-             # Set defaults if loading fails or no file exists
-            st.session_state.user_id = str(uuid.uuid4())
+        if load_app_state(st.session_state.user_id):
+            st.session_state.state_loaded = True
+        else:
+            # Set defaults if loading fails or no file exists for this user
             st.session_state.threads = []
             st.session_state.custom_instructions = {"Default": DEFAULT_INSTRUCTIONS}
             st.session_state.current_instruction_name = "Default"
             st.session_state.state_loaded = True
-
 
     # Initialize other state variables if they don't exist after loading
     if "model" not in st.session_state:
