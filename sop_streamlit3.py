@@ -205,9 +205,79 @@ def run_main_app():
     page = st.sidebar.radio("Go to:", ["🤖 Chatbot", "📄 Instructions", "⚙️ Settings"])
 
     if page == "📄 Instructions":
-        # ... (This page's code remains unchanged)
         st.header("📄 Chatbot Instructions Manager")
-        # (All the logic for creating/editing instructions is here)
+
+        if st.session_state.instruction_edit_mode == "create":
+            st.subheader("➕ Create New Instruction")
+            with st.form("new_instruction_form"):
+                new_name = st.text_input("Instruction Name:")
+                new_content = st.text_area("Instruction Content:", height=300)
+                submitted = st.form_submit_button("💾 Save New Instruction")
+                if submitted:
+                    if new_name and new_content:
+                        if new_name not in st.session_state.custom_instructions:
+                            st.session_state.custom_instructions[new_name] = new_content
+                            st.session_state.current_instruction_name = new_name
+                            st.session_state.instruction_edit_mode = "view"
+                            st.session_state.assistant_setup_complete = False
+                            save_app_state(st.session_state.user_id)
+                            st.success(f"✅ Instruction '{new_name}' saved.")
+                            st.rerun()
+                        else:
+                            st.error("❌ An instruction with this name already exists.")
+                    else:
+                        st.error("❌ Please provide both a name and content.")
+            if st.button("✖️ Cancel"):
+                st.session_state.instruction_edit_mode = "view"
+                st.rerun()
+        else:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                instruction_names = list(st.session_state.custom_instructions.keys())
+                if st.session_state.current_instruction_name not in instruction_names:
+                    st.session_state.current_instruction_name = "Default"
+                selected_instruction = st.selectbox(
+                    "Select instruction to view or edit:",
+                    instruction_names,
+                    index=instruction_names.index(st.session_state.current_instruction_name)
+                )
+                st.session_state.current_instruction_name = selected_instruction
+            with col2:
+                st.write("")
+                st.write("")
+                if st.button("➕ Create New Instruction"):
+                    st.session_state.instruction_edit_mode = "create"
+                    st.rerun()
+
+            st.subheader(f"Editing: '{selected_instruction}'")
+            is_default = selected_instruction == "Default"
+            instruction_content = st.text_area(
+                "Instruction Content:",
+                value=st.session_state.custom_instructions[selected_instruction],
+                height=320,
+                disabled=is_default,
+                key=f"editor_{selected_instruction}"
+            )
+            if not is_default:
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("💾 Save Changes"):
+                        st.session_state.custom_instructions[selected_instruction] = instruction_content
+                        st.session_state.instructions = instruction_content
+                        st.session_state.assistant_setup_complete = False
+                        save_app_state(st.session_state.user_id)
+                        st.success(f"✅ '{selected_instruction}' instructions saved.")
+                with c2:
+                    if st.button("🗑️ Delete Instruction"):
+                        del st.session_state.custom_instructions[selected_instruction]
+                        st.session_state.current_instruction_name = "Default"
+                        st.session_state.instructions = DEFAULT_INSTRUCTIONS
+                        st.session_state.assistant_setup_complete = False
+                        save_app_state(st.session_state.user_id)
+                        st.success(f"✅ '{selected_instruction}' deleted.")
+                        st.rerun()
+            else:
+                st.info("ℹ️ The 'Default' instruction cannot be edited or deleted.")
 
     elif page == "⚙️ Settings":
         st.header("⚙️ Settings")
@@ -300,7 +370,6 @@ def run_main_app():
                 st.error(f"❌ Error setting up assistant: {str(e)}")
                 st.stop()
         
-        # ... (The rest of the chatbot logic remains the same) ...
         client = OpenAI(api_key=st.session_state.api_key)
         st.sidebar.subheader("🧵 Your Threads")
         thread_options = [f"{i+1}: {t['start_time'].split('T')[0]} | {t.get('model', 'N/A')} | {t.get('instruction_name', 'N/A')}" for i, t in enumerate(st.session_state.threads)]
