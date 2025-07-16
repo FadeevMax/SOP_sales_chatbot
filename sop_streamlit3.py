@@ -7,9 +7,10 @@ from datetime import datetime
 import json
 from streamlit_local_storage import LocalStorage
 
-# NEW: Imports for Google Docs API
+# Imports for Google Docs API
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+import io # Needed for handling the in-memory file download
 
 # --- Constants & Configuration ---
 DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
@@ -68,7 +69,7 @@ However, there are several key conditions and rules you must follow for both **G
 * **Flower Page:** Always confirm if you should add the flower page from an order. [cite: 2]
 * **Limited Availability:** If an item has limited stock (e.g., request for 25, only 11 available), you can add the available amount as long as it's **9 units or more**. [cite: 2] If it's less than 9, do not add it. [cite: 2]"""
 STATE_DIR = "user_data"
-# The name of your Google Doc as it appears in Google Drive
+CACHE_DIR = "cache" # A dedicated folder for the cached PDF
 GOOGLE_DOC_NAME = "GTI Data Base and SOP"
 
 # --- Functions for User and State Management (No changes here) ---
@@ -112,61 +113,54 @@ def load_app_state(user_id: str):
                 return False
     return False
 
-# ======================================================================
-# --- NEW: Google Docs Integration ---
-# ======================================================================
-def read_structural_elements(elements):
-    """Recursively parses the structured elements of a Google Doc to extract text."""
-    text = ''
-    for value in elements:
-        if 'paragraph' in value:
-            para_elements = value.get('paragraph').get('elements')
-            for elem in para_elements:
-                text += elem.get('textRun', {}).get('content', '')
-        elif 'table' in value:
-            table = value.get('table')
-            for row in table.get('tableRows'):
-                for cell in row.get('tableCells'):
-                    text += read_structural_elements(cell.get('content'))
-                text += '\n'
-    return text
-
-@st.cache_data(ttl=600) # Cache for 10 minutes
-def fetch_google_doc_content(doc_name: str) -> str:
-    """Connects to Google Docs API, finds a doc by name, and returns its text content."""
+@st.cache_data(ttl=600) # Cache the result for 10 minutes (600 seconds)
+def get_live_sop_pdf_path(doc_name: str) -> str:
+    """
+    Checks for a fresh cached PDF. If it's stale or missing, it downloads
+    the live Google Doc as a PDF and saves it to the cache.
+    Returns the file path to the fresh PDF.
+    """
     try:
-        scopes = [
-            'https://www.googleapis.com/auth/drive.readonly',
-            'https://www.googleapis.com/auth/documents.readonly'
-        ]
+        st.info("Checking for SOP updates from Google Docs...")
+        
+        # Create cache directory if it doesn't exist
+        if not os.path.exists(CACHE_DIR):
+            os.makedirs(CACHE_DIR)
+            
+        scopes = ['https://www.googleapis.com/auth/drive.readonly']
         creds_dict = st.secrets["gcp_service_account"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-
         drive_service = build('drive', 'v3', credentials=creds)
-        docs_service = build('docs', 'v1', credentials=creds)
 
-        # Find the document by name
         query = f"name='{doc_name}' and mimeType='application/vnd.google-apps.document'"
         response = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
         files = response.get('files', [])
 
         if not files:
-            st.error(f"No Google Doc found with the name: '{doc_name}'. Please check the name and sharing settings.")
+            st.error(f"No Google Doc found with the name: '{doc_name}'.")
             return None
         
         doc_id = files[0]['id']
         
-        # Retrieve the document content
-        document = docs_service.documents().get(documentId=doc_id).execute()
-        doc_content = document.get('body').get('content', [])
+        # Export the document as PDF
+        request = drive_service.files().export_media(fileId=doc_id, mimeType='application/pdf')
         
-        full_text = read_structural_elements(doc_content)
+        # Download the file content into an in-memory buffer
+        fh = io.BytesIO()
+        downloader = io.BytesIO(request.execute())
         
-        st.success(f"✅ Successfully fetched content from Google Doc: '{doc_name}'")
-        return full_text
+        # Define the path for the cached file
+        cached_file_path = os.path.join(CACHE_DIR, "cached_sop.pdf")
+        
+        # Write the downloaded content to the cached file
+        with open(cached_file_path, "wb") as f:
+            f.write(downloader.getbuffer())
+            
+        st.success(f"✅ SOP updated successfully from Google Docs!")
+        return cached_file_path
 
     except Exception as e:
-        st.error(f"❌ Failed to fetch Google Doc: {e}")
+        st.error(f"❌ Failed to fetch and cache Google Doc: {e}")
         return None
 
 # --- Session State Initialization Function ---
@@ -326,21 +320,19 @@ def run_main_app():
         # --- MODIFIED: Assistant Setup with Google Docs ---
         if not st.session_state.get('assistant_setup_complete', False):
             try:
-                with st.spinner("Fetching latest SOP from Google Docs..."):
-                    live_sop_content = fetch_google_doc_content(GOOGLE_DOC_NAME)
-                    
-                    if live_sop_content:
-                        temp_file_path = f"temp_sop_{st.session_state.user_id}.txt"
-                        with open(temp_file_path, "w", encoding="utf-8") as f:
-                            f.write(live_sop_content)
-                        st.session_state.file_path = temp_file_path
-                    else:
-                        st.error("Could not fetch SOP from Google Docs. Assistant setup failed.")
-                        st.stop()
+                # This one line now handles all the caching logic!
+                live_pdf_path = get_live_sop_pdf_path(GOOGLE_DOC_NAME)
+                
+                if live_pdf_path and os.path.exists(live_pdf_path):
+                    st.session_state.file_path = live_pdf_path
+                else:
+                    st.error("Could not retrieve the SOP PDF. Assistant setup failed.")
+                    st.stop()
 
                 with st.spinner("Setting up AI assistant with the latest data..."):
                     client = OpenAI(api_key=st.session_state.api_key)
                     
+                    # Use the cached PDF path to create the file
                     file_response = client.files.create(file=open(st.session_state.file_path, "rb"), purpose="assistants")
                     
                     vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
