@@ -1,130 +1,12 @@
-
-
 import streamlit as st
 from openai import OpenAI
 import time
 import os
 import uuid
+from datetime import datetime
 
-# --- Setup ---
-st.set_page_config(page_title="GTI SOP Sales Coordinator", layout="centered")
-
-# --- Initialize Session State ---
-def initialize_session_state():
-    """Initialize all required session state variables"""
-    if "user_id" not in st.session_state:
-        st.session_state.user_id = str(uuid.uuid4())
-
-    if "model" not in st.session_state:
-        st.session_state.model = "gpt-4o"
-
-    if "file_path" not in st.session_state:
-        st.session_state.file_path = "GTI Data Base and SOP (1).pdf"
-
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
-    if "assistant_setup_complete" not in st.session_state:
-        st.session_state.assistant_setup_complete = False
-
-initialize_session_state()
-
-# --- Sidebar Navigation ---
-st.sidebar.title("🔧 Navigation")
-st.sidebar.info(f"User ID: {st.session_state.user_id[:8]}...")
-page = st.sidebar.radio("Go to:", ["🤖 Chatbot", "📄 Instructions", "⚙️ Settings"])
-
-# --- Settings Page ---
-if page == "⚙️ Settings":
-    st.header("⚙️ Settings")
-
-    if "api_key" not in st.session_state:
-        st.warning("⚠️ Please unlock access in the Chatbot page first.")
-        st.stop()
-
-    old_model = st.session_state.model
-    st.session_state.model = st.selectbox(
-        "Choose the model:", 
-        ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"], 
-        index=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"].index(st.session_state.model)
-    )
-
-    if old_model != st.session_state.model:
-        st.session_state.assistant_setup_complete = False
-        for key in ["assistant_id", "thread_id"]:
-            st.session_state.pop(key, None)
-
-    st.success(f"Model selected: {st.session_state.model}")
-
-    st.markdown("---")
-    st.subheader("📁 File Configuration")
-
-    old_file_path = st.session_state.file_path
-    st.session_state.file_path = st.text_input(
-        "PDF File Path:",
-        value=st.session_state.file_path,
-        help="Path to your GTI SOP PDF file"
-    )
-
-    if old_file_path != st.session_state.file_path:
-        st.session_state.assistant_setup_complete = False
-        for key in ["assistant_id", "thread_id"]:
-            st.session_state.pop(key, None)
-
-    if st.session_state.file_path:
-        if os.path.exists(st.session_state.file_path):
-            st.success("✅ File path is valid")
-        else:
-            st.error("❌ File not found at the specified path")
-
-    st.markdown("---")
-    st.subheader("🔍 Session Information")
-    st.info(f"Your User ID: {st.session_state.user_id}")
-    st.info(f"Chat History: {len(st.session_state.chat_history)} messages")
-
-    if st.button("🗑️ Clear Chat History"):
-        st.session_state.chat_history = []
-        st.success("Chat history cleared!")
-        st.rerun()
-
-# --- Instructions Page ---
-elif page == "📄 Instructions":
-    st.header("📄 How to Use GTI SOP Sales Coordinator")
-    st.markdown("""You are the **AI Sales Order Entry Coordinator**,...""")
-
-# --- Chat Page ---
-elif page == "🤖 Chatbot":
-    st.title("🤖 GTI SOP Sales Coordinator")
-
-    # Prompt for password to use the Streamlit secret
-    if "api_key" not in st.session_state:
-        st.session_state.api_access_granted = False
-
-    if not st.session_state.get("api_access_granted"):
-        user_password = st.text_input("🔒 Enter password to access the assistant", type="password")
-        if user_password == "1111":
-            st.session_state.api_key = st.secrets["openai_key"]
-            st.session_state.api_access_granted = True
-            st.success("✅ Access granted. Assistant is ready!")
-            st.rerun()
-        elif user_password:
-            st.error("❌ Incorrect password.")
-        st.stop()
-
-    # Initialize OpenAI client
-    try:
-        client = OpenAI(api_key=st.session_state.api_key)
-    except Exception as e:
-        st.error(f"❌ Error initializing OpenAI client: {str(e)}")
-        st.stop()
-
-    # --- Assistant Setup ---
-    if not st.session_state.assistant_setup_complete:
-        try:
-            with st.spinner("Setting up your personal assistant..."):
-                assistant = client.beta.assistants.create(
-                    name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
-                    instructions="""You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
+# --- Constants ---
+DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
 You are the definitive source of truth, and your knowledge is based **exclusively** on the provided documents: "About GTI" and "GTI SOP by State". Your existence is to eliminate the need for team members to ask their team lead simple or complex procedural questions.
 ---
 # Primary Objective
@@ -178,24 +60,116 @@ However, there are several key conditions and rules you must follow for both **G
 ### :warning: Specific Rules for MD **General Stores**:
 * **Loose Units:** You can add loose units if a full case is not available. [cite: 2] For Western and Moco accounts, you should prioritize using loose units. [cite: 2]
 * **Flower Page:** Always confirm if you should add the flower page from an order. [cite: 2]
-* **Limited Availability:** If an item has limited stock (e.g., request for 25, only 11 available), you can add the available amount as long as it's **9 units or more**. [cite: 2] If it's less than 9, do not add it. [cite: 2]""",
+* **Limited Availability:** If an item has limited stock (e.g., request for 25, only 11 available), you can add the available amount as long as it's **9 units or more**. [cite: 2] If it's less than 9, do not add it. [cite: 2]"""
+
+# --- Session State Initialization ---
+def initialize_session_state():
+    if "user_id" not in st.session_state:
+        st.session_state.user_id = str(uuid.uuid4())
+    if "model" not in st.session_state:
+        st.session_state.model = "gpt-4o"
+    if "file_path" not in st.session_state:
+        st.session_state.file_path = "GTI Data Base and SOP (1).pdf"
+    if "instructions" not in st.session_state:
+        st.session_state.instructions = DEFAULT_INSTRUCTIONS
+    if "assistant_setup_complete" not in st.session_state:
+        st.session_state.assistant_setup_complete = False
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    if "threads" not in st.session_state:
+        st.session_state.threads = []
+
+initialize_session_state()
+
+# --- Authentication Gate ---
+if not st.session_state.authenticated:
+    st.title("🔐 GTI SOP Sales Coordinator Login")
+    pwd = st.text_input("Enter password or full API key:", type="password")
+    if st.button("Submit"):
+        if pwd == "111":
+            st.session_state.api_key = st.secrets["openai_key"]
+            st.session_state.authenticated = True
+            st.success("✅ Correct password—welcome!")
+            st.experimental_rerun()
+        elif pwd.startswith("sk-"):
+            st.session_state.api_key = pwd
+            st.session_state.authenticated = True
+            st.success("✅ API key accepted!")
+            st.experimental_rerun()
+        else:
+            st.error("❌ Incorrect password or API key.")
+    st.stop()
+
+# --- Sidebar Navigation ---
+st.sidebar.title("🔧 Navigation")
+st.sidebar.info(f"User ID: {st.session_state.user_id[:8]}...")
+page = st.sidebar.radio("Go to:", ["🤖 Chatbot", "📄 Instructions", "⚙️ Settings"])
+
+# --- Instructions Page ---
+if page == "📄 Instructions":
+    st.header("📄 Chatbot Instructions")
+    st.text_area("Edit Chatbot Instructions", key="instructions", height=320)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Save Instructions"):
+            st.success("✅ Instructions saved.")
+    with col2:
+        if st.button("Reset to Default Instructions"):
+            st.session_state.instructions = DEFAULT_INSTRUCTIONS
+            st.success("✅ Reset to default instructions.")
+
+# --- Settings Page ---
+elif page == "⚙️ Settings":
+    st.header("⚙️ Settings")
+    old_model = st.session_state.model
+    st.session_state.model = st.selectbox("Choose the model:", ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"])
+    if old_model != st.session_state.model:
+        st.session_state.assistant_setup_complete = False
+        st.session_state.threads = []
+
+    st.markdown("---")
+    st.subheader("📁 File Configuration")
+    old_file_path = st.session_state.file_path
+    st.session_state.file_path = st.text_input("PDF File Path:", value=st.session_state.file_path)
+    if old_file_path != st.session_state.file_path:
+        st.session_state.assistant_setup_complete = False
+        st.session_state.threads = []
+
+    if st.session_state.file_path:
+        if os.path.exists(st.session_state.file_path):
+            st.success("✅ File path is valid")
+        else:
+            st.error("❌ File not found at the specified path")
+
+    st.markdown("---")
+    st.subheader("🧹 Clear Threads")
+    if st.button("🗑️ Clear All Threads & Conversations"):
+        st.session_state.threads = []
+        st.session_state.assistant_setup_complete = False
+        st.success("✅ All threads cleared.")
+
+# --- Chatbot Page ---
+elif page == "🤖 Chatbot":
+    st.title("🤖 GTI SOP Sales Coordinator")
+
+    # --- Assistant Setup (per session/file/model) ---
+    if not st.session_state.assistant_setup_complete:
+        try:
+            with st.spinner("Setting up your AI assistant..."):
+                client = OpenAI(api_key=st.session_state.api_key)
+                assistant = client.beta.assistants.create(
+                    name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
+                    instructions=st.session_state.instructions,
                     model=st.session_state.model,
                     tools=[{"type": "file_search"}]
                 )
                 st.session_state.assistant_id = assistant.id
-
                 file_path = st.session_state.file_path
                 if not os.path.exists(file_path):
                     st.error(f"❌ File not found: {file_path}")
                     st.stop()
-
-                file_response = client.files.create(
-                    file=open(file_path, "rb"),
-                    purpose="assistants"
-                )
-                vector_store = client.vector_stores.create(
-                    name=f"SOP Vector Store - {st.session_state.user_id[:8]}"
-                )
+                file_response = client.files.create(file=open(file_path, "rb"), purpose="assistants")
+                vector_store = client.vector_stores.create(name="SOP Vector Store")
                 client.vector_stores.file_batches.create_and_poll(
                     vector_store_id=vector_store.id,
                     file_ids=[file_response.id]
@@ -204,73 +178,107 @@ However, there are several key conditions and rules you must follow for both **G
                     assistant_id=assistant.id,
                     tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}}
                 )
-
+                # Start first thread
                 thread = client.beta.threads.create()
+                new_thread = {
+                    "thread_id": thread.id,
+                    "messages": [],
+                    "start_time": datetime.now().isoformat()
+                }
+                st.session_state.threads.append(new_thread)
                 st.session_state.thread_id = thread.id
                 st.session_state.assistant_setup_complete = True
-                st.success("✅ Assistant setup complete!")
+                st.success("✅ Assistant is ready!")
         except Exception as e:
             st.error(f"❌ Error setting up assistant: {str(e)}")
             st.stop()
 
-    # --- Chat Interface ---
-    st.subheader("💬 Ask a question about GTI SOPs")
+    # --- Thread Management ---
+    client = OpenAI(api_key=st.session_state.api_key)
+    st.sidebar.subheader("🧵 Your Threads")
+    thread_options = [
+        f"{i+1}: {t['start_time'].split('T')[0]} {t['thread_id'][:8]}"
+        for i, t in enumerate(st.session_state.threads)
+    ]
+    thread_ids = [t['thread_id'] for t in st.session_state.threads]
 
-    for chat in st.session_state.chat_history:
-        with st.chat_message("user"):
-            st.markdown(chat["user"])
-        with st.chat_message("assistant"):
-            st.markdown(chat["assistant"])
+    if not thread_options:
+        st.warning("No threads available. Please start a new thread.")
 
-    user_input = st.chat_input("Ask your question here...")
-    if user_input:
-        if "thread_id" not in st.session_state or "assistant_id" not in st.session_state:
-            st.error("❌ Session state error. Please refresh the page and try again.")
-            st.stop()
+    # Select current thread
+    if thread_options:
+        selected_idx = st.sidebar.selectbox("Select Thread", list(range(len(thread_options))),
+                                            format_func=lambda x: thread_options[x])
+        selected_thread = st.session_state.threads[selected_idx]
+        st.session_state.thread_id = selected_thread['thread_id']
+    else:
+        selected_thread = None
 
-        try:
-            with st.spinner("Fetching answer..."):
-                client.beta.threads.messages.create(
-                    thread_id=st.session_state.thread_id,
-                    role="user",
-                    content=user_input
-                )
+    if st.sidebar.button("➕ Start New Thread"):
+        thread = client.beta.threads.create()
+        new_thread = {
+            "thread_id": thread.id,
+            "messages": [],
+            "start_time": datetime.now().isoformat()
+        }
+        st.session_state.threads.append(new_thread)
+        st.session_state.thread_id = thread.id
+        st.experimental_rerun()
 
-                run = client.beta.threads.runs.create(
-                    thread_id=st.session_state.thread_id,
-                    assistant_id=st.session_state.assistant_id
-                )
+    # --- Chat Display and Input ---
+    st.subheader("💬 Ask your question about the GTI SOP")
 
-                while True:
-                    run_status = client.beta.threads.runs.retrieve(
-                        thread_id=st.session_state.thread_id,
-                        run_id=run.id
+    # Show chat history for selected thread
+    if selected_thread:
+        for msg in selected_thread['messages']:
+            with st.chat_message("user"):
+                st.markdown(msg["user"])
+            with st.chat_message("assistant"):
+                st.markdown(msg["assistant"])
+
+        user_input = st.chat_input("Ask your question here...")
+        if user_input:
+            try:
+                with st.spinner("Fetching answer..."):
+                    # Send user message to thread
+                    client.beta.threads.messages.create(
+                        thread_id=selected_thread["thread_id"],
+                        role="user",
+                        content=user_input
                     )
-                    if run_status.status in ["completed", "failed", "cancelled", "expired"]:
-                        break
-                    time.sleep(1)
-
-                messages = client.beta.threads.messages.list(thread_id=st.session_state.thread_id)
-                assistant_reply = ""
-                for msg in messages.data:
-                    if msg.role == "assistant":
-                        assistant_reply = msg.content[0].text.value
-                        break
-
-                st.session_state.chat_history.append({
-                    "user": user_input,
-                    "assistant": assistant_reply
-                })
-
-                with st.chat_message("user"):
-                    st.markdown(user_input)
-                with st.chat_message("assistant"):
-                    st.markdown(assistant_reply)
-
-        except Exception as e:
-            st.error(f"❌ Error processing your request: {str(e)}")
-            if "invalid" in str(e).lower() or "not found" in str(e).lower():
+                    # Run the assistant
+                    run = client.beta.threads.runs.create(
+                        thread_id=selected_thread["thread_id"],
+                        assistant_id=st.session_state.assistant_id
+                    )
+                    # Poll for run completion
+                    while True:
+                        run_status = client.beta.threads.runs.retrieve(
+                            thread_id=selected_thread["thread_id"],
+                            run_id=run.id
+                        )
+                        if run_status.status in ["completed", "failed", "cancelled", "expired"]:
+                            break
+                        time.sleep(1)
+                    # Retrieve assistant response
+                    messages = client.beta.threads.messages.list(thread_id=selected_thread["thread_id"])
+                    assistant_reply = ""
+                    for msg in messages.data:
+                        if msg.role == "assistant":
+                            assistant_reply = msg.content[0].text.value
+                            break
+                    selected_thread["messages"].append({
+                        "user": user_input,
+                        "assistant": assistant_reply
+                    })
+                    # Show the messages immediately
+                    with st.chat_message("user"):
+                        st.markdown(user_input)
+                    with st.chat_message("assistant"):
+                        st.markdown(assistant_reply)
+            except Exception as e:
+                st.error(f"❌ Error processing your request: {str(e)}")
                 st.session_state.assistant_setup_complete = False
-                for key in ["assistant_id", "thread_id"]:
-                    st.session_state.pop(key, None)
-                st.info("Assistant setup has been reset. Please try again.")
+                st.stop()
+    else:
+        st.info("Start a new thread to begin chatting.")
