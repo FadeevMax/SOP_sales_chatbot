@@ -11,7 +11,8 @@ import difflib
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import io # Needed for handling the in-memory file download
-
+import requests
+import base64
 # --- Constants & Configuration ---
 DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
 You are the definitive source of truth, and your knowledge is based **exclusively** on the provided documents: "About GTI" and "GTI SOP by State". Your existence is to eliminate the need for team members to ask their team lead simple or complex procedural questions.
@@ -88,7 +89,39 @@ DOCX_LOCAL_PATH = os.path.join(CACHE_DIR, "sop.docx")
 IMAGE_DIR = os.path.join(CACHE_DIR, "images")
 IMAGE_MAP_PATH = os.path.join(CACHE_DIR, "image_map.json")
 
+def load_image_map_from_github():
+    """
+    Downloads image_map.json directly from GitHub and returns as a Python dict.
+    """
+    GITHUB_IMAGE_MAP_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/image_map.json"
+    try:
+        resp = requests.get(GITHUB_IMAGE_MAP_URL)
+        if resp.status_code == 200:
+            return resp.json()
+        else:
+            st.warning("Could not fetch image_map.json from GitHub.")
+            return {}
+    except Exception as e:
+        st.warning(f"Error loading image map from GitHub: {e}")
+        return {}
 
+def upload_file_to_github(local_path, github_path, commit_message):
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{github_path}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    # Get SHA for overwrite
+    r = requests.get(url, headers=headers)
+    sha = r.json().get("sha") if r.status_code == 200 else None
+    # Encode file
+    with open(local_path, "rb") as f:
+        content = base64.b64encode(f.read()).decode()
+    data = {
+        "message": commit_message,
+        "content": content,
+        "sha": sha
+    }
+    resp = requests.put(url, headers=headers, json=data)
+    return resp.status_code in [200, 201]
+   
 def update_docx_on_github(local_docx_path):
     docx_name = "Live_GTI_SOP.docx"
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{docx_name}"
@@ -116,23 +149,17 @@ def download_gdoc_as_docx(doc_id, creds, out_path):
 
 def maybe_show_referenced_images(answer_text):
     try:
-        image_dir = os.path.join(CACHE_DIR, "images")
-        image_map_path = os.path.join(CACHE_DIR, "image_map.json")
-        
-        if not os.path.exists(image_map_path):
+        image_map = load_image_map_from_github()
+        if not image_map:
             return
-        
-        with open(image_map_path, "r") as f:
-            image_map = json.load(f)
-        
+
         for caption, filename in image_map.items():
-            # Match using similarity
+            # Match using similarity or substring (you can tweak the matching as needed)
             similarity = difflib.SequenceMatcher(None, caption.lower(), answer_text.lower()).ratio()
-            if similarity > 0.6:
-                image_path = os.path.join(image_dir, filename)
-                if os.path.exists(image_path):
-                    st.image(image_path, caption=caption)
-    
+            if similarity > 0.6 or caption.lower() in answer_text.lower():
+                # Build the GitHub raw image URL
+                github_image_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/images/{filename}"
+                st.image(github_image_url, caption=caption)
     except Exception as e:
         st.warning(f"⚠️ Could not load referenced image: {e}")
 
@@ -166,8 +193,7 @@ def set_last_gdoc_synced_time(modified_time):
     with open(GDOC_STATE_PATH, "w") as f:
         json.dump({"last_synced_modified_time": modified_time}, f)
 
-import base64
-import requests
+
 
 def update_pdf_on_github(local_pdf_path):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_PDF_NAME}"
@@ -223,7 +249,20 @@ def sync_gdoc_to_github(force=False):
 
     # Extract labeled images from DOCX
     extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
-   
+    json_uploaded = upload_file_to_github(
+    IMAGE_MAP_PATH,
+    "image_map.json",
+    "Update image_map.json from SOP DOCX"
+)
+    # Upload images to GitHub
+    for image_file in os.listdir(IMAGE_DIR):
+       local_image_path = os.path.join(IMAGE_DIR, image_file)
+       github_image_path = f"images/{image_file}"
+       upload_file_to_github(
+          local_image_path,
+          github_image_path,
+          f"Update {image_file} from SOP DOCX"
+          )
     # Upload PDF and DOCX to GitHub
     pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
     docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
