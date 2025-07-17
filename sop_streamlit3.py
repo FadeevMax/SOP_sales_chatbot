@@ -370,17 +370,26 @@ def run_main_app():
          st.markdown("---")
          st.subheader("📄 View Live SOP Document")
          
-         force_update = st.button("Check for Updates")
-         if sync_gdoc_to_github(force=force_update):
-             # Download from GitHub (always use the latest from GitHub as the working file)
-             github_pdf_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{GITHUB_PDF_NAME}"
-             r = requests.get(github_pdf_url)
-             if r.status_code == 200:
+         # Button to check for Google Doc updates
+         if st.button("Check for Updates from Google Doc"):
+             # Try syncing Google Doc to GitHub
+             success = sync_gdoc_to_github(force=True)
+             if success:
+                 st.success("✅ Checked Google Doc: GitHub PDF is now up to date!")
+             else:
+                 st.error("❌ Update failed or no change detected.")
+         
+         # Always use latest GitHub PDF as knowledge base
+         github_pdf_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{GITHUB_PDF_NAME}"
+         try:
+             response = requests.get(github_pdf_url)
+             if response.status_code == 200:
+                 # Save/overwrite local cached PDF
                  with open(PDF_CACHE_PATH, "wb") as f:
-                     f.write(r.content)
+                     f.write(response.content)
                  last_modified_time = os.path.getmtime(PDF_CACHE_PATH)
                  last_modified_dt = datetime.fromtimestamp(last_modified_time)
-                 st.write(f"SOP last updated: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
+                 st.write(f"SOP last updated locally: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
                  with open(PDF_CACHE_PATH, "rb") as pdf_file:
                      st.download_button(
                          label="⬇️ Download Live SOP as PDF",
@@ -390,8 +399,8 @@ def run_main_app():
                      )
              else:
                  st.warning("Could not retrieve the SOP PDF from GitHub.")
-         else:
-             st.warning("Failed to check or sync updates from Google Doc.")
+         except Exception as e:
+             st.error(f"Error fetching PDF from GitHub: {e}")
          
          st.markdown("---")
 
