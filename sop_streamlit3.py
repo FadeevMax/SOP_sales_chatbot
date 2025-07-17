@@ -68,10 +68,102 @@ However, there are several key conditions and rules you must follow for both **G
 * **Loose Units:** You can add loose units if a full case is not available. [cite: 2] For Western and Moco accounts, you should prioritize using loose units. [cite: 2]
 * **Flower Page:** Always confirm if you should add the flower page from an order. [cite: 2]
 * **Limited Availability:** If an item has limited stock (e.g., request for 25, only 11 available), you can add the available amount as long as it's **9 units or more**. [cite: 2] If it's less than 9, do not add it. [cite: 2]"""
-STATE_DIR = "user_data"
-CACHE_DIR = "cache" # A dedicated folder for the cached PDF
+CACHE_DIR = "cache"
+PDF_CACHE_PATH = os.path.join(CACHE_DIR, "cached_sop.pdf")
+GDOC_STATE_PATH = os.path.join(CACHE_DIR, "gdoc_state.json")
+GITHUB_PDF_NAME = "Live_GTI_SOP.pdf"
+GITHUB_REPO = "FadeevMax/SOP_sales_chatbot"
+GITHUB_TOKEN = st.secrets["GitHub_API"]
 GOOGLE_DOC_NAME = "GTI Data Base and SOP"
 
+def get_gdoc_last_modified(creds, doc_name):
+    drive_service = build('drive', 'v3', credentials=creds)
+    query = f"name='{doc_name}' and mimeType='application/vnd.google-apps.document'"
+    results = drive_service.files().list(q=query, fields="files(id, modifiedTime)").execute()
+    files = results.get('files', [])
+    if not files:
+        return None, None
+    doc_id = files[0]['id']
+    modified_time = files[0]['modifiedTime']
+    return doc_id, modified_time
+
+def download_gdoc_as_pdf(doc_id, creds, out_path):
+    drive_service = build('drive', 'v3', credentials=creds)
+    request = drive_service.files().export_media(fileId=doc_id, mimeType='application/pdf')
+    with open(out_path, "wb") as f:
+        f.write(request.execute())
+    return True
+
+def get_last_gdoc_synced_time():
+    if os.path.exists(GDOC_STATE_PATH):
+        with open(GDOC_STATE_PATH, "r") as f:
+            state = json.load(f)
+            return state.get("last_synced_modified_time")
+    return None
+
+def set_last_gdoc_synced_time(modified_time):
+    with open(GDOC_STATE_PATH, "w") as f:
+        json.dump({"last_synced_modified_time": modified_time}, f)
+
+import base64
+import requests
+
+def update_pdf_on_github(local_pdf_path):
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_PDF_NAME}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    # Get SHA for overwrite
+    r = requests.get(url, headers=headers)
+    sha = r.json().get("sha") if r.status_code == 200 else None
+    # Encode file
+    with open(local_pdf_path, "rb") as f:
+        content = base64.b64encode(f.read()).decode()
+    data = {
+        "message": "Update SOP PDF from Google Doc",
+        "content": content,
+        "sha": sha
+    }
+    resp = requests.put(url, headers=headers, json=data)
+    return resp.status_code in [200, 201]
+
+def sync_gdoc_to_github(force=False):
+    # Only check if a day has passed or force=True
+    last_synced = get_last_gdoc_synced_time()
+    now = datetime.utcnow()
+    last_checked_dt = datetime.fromisoformat(last_synced) if last_synced else None
+
+    # Google API Auth
+    scopes = ['https://www.googleapis.com/auth/drive.readonly']
+    creds_dict = st.secrets["gcp_service_account"]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    doc_id, modified_time = get_gdoc_last_modified(creds, GOOGLE_DOC_NAME)
+    if not doc_id or not modified_time:
+        st.warning("Google Doc not found or can't fetch modified time.")
+        return False
+
+    # Only update if new or forced or more than 1 day has passed
+    need_update = (
+        force or 
+        not last_synced or 
+        (now - last_checked_dt > timedelta(days=1)) or
+        (modified_time != last_synced)
+    )
+    if not need_update:
+        st.info("No update needed. Using existing GitHub PDF.")
+        return True
+
+    # Download latest Google Doc as PDF
+    if not download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH):
+        st.error("Failed to download Google Doc as PDF.")
+        return False
+    # Upload to GitHub
+    if update_pdf_on_github(PDF_CACHE_PATH):
+        st.success("PDF updated on GitHub with the latest from Google Doc!")
+        set_last_gdoc_synced_time(modified_time)
+        return True
+    else:
+        st.error("Failed to update PDF on GitHub.")
+        return False
+       
 # --- Functions for User and State Management (No changes here) ---
 def get_persistent_user_id(local_storage: LocalStorage) -> str:
     user_id = local_storage.getItem("user_id")
@@ -275,49 +367,33 @@ def run_main_app():
 
     elif page == "⚙️ Settings":
         st.header("⚙️ Settings")
-        st.markdown("---")
-
-        # --- NEW: Section to View/Download the Live SOP PDF ---
-        st.subheader("📄 View Live SOP Document")
-        st.info(
-            "This section allows you to download the exact PDF version of the SOP that the AI is currently using. "
-            "The file is automatically updated from Google Docs and cached for 10 minutes."
-        )
-
-        # We call our existing caching function to get the path to the PDF.
-        # This will either trigger a new download or use the fresh cached version.
-        pdf_path = get_live_sop_pdf_path(GOOGLE_DOC_NAME)
-
-        # Check if the file was successfully created/retrieved
-        if pdf_path and os.path.exists(pdf_path):
-            # Display the last modified time to the user
-            last_modified_time = os.path.getmtime(pdf_path)
-            last_modified_dt = datetime.fromtimestamp(last_modified_time)
-            st.write(f"SOP last updated: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
-
-            # Read the PDF file's content in binary mode
-            with open(pdf_path, "rb") as pdf_file:
-                pdf_bytes = pdf_file.read()
-
-            # Create the download button
-            st.download_button(
-                label="⬇️ Download Live SOP as PDF",
-                data=pdf_bytes,
-                file_name="Live_GTI_SOP.pdf",
-                mime="application/pdf"
-            )
-        else:
-            st.warning("Could not retrieve the SOP PDF. Please check the logs for errors.")
-
-        st.markdown("---")
-
-        # --- Existing "Clear Threads" functionality ---
-        st.subheader("🧹 Clear Threads")
-        if st.button("🗑️ Clear All Threads & Conversations"):
-            st.session_state.threads = []
-            st.session_state.assistant_setup_complete = False
-            save_app_state(st.session_state.user_id)
-            st.success("✅ All threads cleared.")
+         st.markdown("---")
+         st.subheader("📄 View Live SOP Document")
+         
+         force_update = st.button("Check for Updates")
+         if sync_gdoc_to_github(force=force_update):
+             # Download from GitHub (always use the latest from GitHub as the working file)
+             github_pdf_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{GITHUB_PDF_NAME}"
+             r = requests.get(github_pdf_url)
+             if r.status_code == 200:
+                 with open(PDF_CACHE_PATH, "wb") as f:
+                     f.write(r.content)
+                 last_modified_time = os.path.getmtime(PDF_CACHE_PATH)
+                 last_modified_dt = datetime.fromtimestamp(last_modified_time)
+                 st.write(f"SOP last updated: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
+                 with open(PDF_CACHE_PATH, "rb") as pdf_file:
+                     st.download_button(
+                         label="⬇️ Download Live SOP as PDF",
+                         data=pdf_file,
+                         file_name=GITHUB_PDF_NAME,
+                         mime="application/pdf"
+                     )
+             else:
+                 st.warning("Could not retrieve the SOP PDF from GitHub.")
+         else:
+             st.warning("Failed to check or sync updates from Google Doc.")
+         
+         st.markdown("---")
 
     elif page == "🤖 Chatbot":
         st.title("🤖 GTI SOP Sales Coordinator")
