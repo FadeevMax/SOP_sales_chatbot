@@ -88,6 +88,25 @@ DOCX_LOCAL_PATH = os.path.join(CACHE_DIR, "sop.docx")
 IMAGE_DIR = os.path.join(CACHE_DIR, "images")
 IMAGE_MAP_PATH = os.path.join(CACHE_DIR, "image_map.json")
 
+
+def update_docx_on_github(local_docx_path):
+    docx_name = "Live_GTI_SOP.docx"
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{docx_name}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    # Get SHA for overwrite
+    r = requests.get(url, headers=headers)
+    sha = r.json().get("sha") if r.status_code == 200 else None
+    # Encode file
+    with open(local_docx_path, "rb") as f:
+        content = base64.b64encode(f.read()).decode()
+    data = {
+        "message": "Update SOP DOCX from Google Doc",
+        "content": content,
+        "sha": sha
+    }
+    resp = requests.put(url, headers=headers, json=data)
+    return resp.status_code in [200, 201]
+
 def download_gdoc_as_docx(doc_id, creds, out_path):
    drive_service = build('drive', 'v3', credentials=creds)
    request = drive_service.files().export_media(fileId=doc_id, mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
@@ -196,25 +215,32 @@ def sync_gdoc_to_github(force=False):
     # Download latest Google Doc as PDF
     # Download latest Google Doc as PDF and DOCX
     pdf_success = download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH)
-    docx_success = download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
-      
-    if not (pdf_success and docx_success):
-       st.error("Failed to download Google Doc as PDF or DOCX.")
-       return False
-      
-      # Extract labeled images
-    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
+docx_success = download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
 
-   # 3. Extract labeled images
-    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
-    # Upload to GitHub
-    if update_pdf_on_github(PDF_CACHE_PATH):
-        st.success("PDF updated on GitHub with the latest from Google Doc!")
-        set_last_gdoc_synced_time(modified_time)
-        return True
-    else:
-        st.error("Failed to update PDF on GitHub.")
-        return False
+if not (pdf_success and docx_success):
+    st.error("Failed to download Google Doc as PDF or DOCX.")
+    return False
+
+# Extract labeled images from DOCX
+extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
+
+# Upload PDF and DOCX to GitHub
+pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
+docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
+
+if pdf_uploaded and docx_uploaded:
+    st.success("PDF and DOCX updated on GitHub with the latest from Google Doc!")
+    set_last_gdoc_synced_time(modified_time)
+    return True
+elif pdf_uploaded:
+    st.error("PDF uploaded, but failed to update DOCX on GitHub.")
+    return False
+elif docx_uploaded:
+    st.error("DOCX uploaded, but failed to update PDF on GitHub.")
+    return False
+else:
+    st.error("Failed to update both PDF and DOCX on GitHub.")
+    return False
 
 from docx import Document
 import re
