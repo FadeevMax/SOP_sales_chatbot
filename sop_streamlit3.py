@@ -401,16 +401,7 @@ def update_pdf_on_github(local_pdf_path):
     }
     resp = requests.put(url, headers=headers, json=data)
     return resp.status_code in [200, 201]
-        return True
-    elif pdf_uploaded:
-        st.error("PDF uploaded, but failed to update DOCX on GitHub.")
-        return False
-    elif docx_uploaded:
-        st.error("DOCX uploaded, but failed to update PDF on GitHub.")
-        return False
-    else:
-        st.error("Failed to update both PDF and DOCX on GitHub.")
-        return False
+      
 
 
 # --- Functions for User and State Management (No changes here) ---
