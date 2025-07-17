@@ -333,6 +333,7 @@ def update_docx_on_github(local_docx_path):
 def download_gdoc_as_docx(doc_id, creds, out_path):
    drive_service = build('drive', 'v3', credentials=creds)
    request = drive_service.files().export_media(fileId=doc_id, mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+   os.makedirs(os.path.dirname(out_path), exist_ok=True)
    with open(out_path, "wb") as f:
      f.write(request.execute())
    return True
@@ -368,6 +369,7 @@ def get_gdoc_last_modified(creds, doc_name):
 def download_gdoc_as_pdf(doc_id, creds, out_path):
     drive_service = build('drive', 'v3', credentials=creds)
     request = drive_service.files().export_media(fileId=doc_id, mimeType='application/pdf')
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "wb") as f:
         f.write(request.execute())
     return True
