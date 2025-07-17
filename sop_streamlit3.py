@@ -194,10 +194,16 @@ def sync_gdoc_to_github(force=False):
         return True
 
     # Download latest Google Doc as PDF
-    if not download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH):
-        st.error("Failed to download Google Doc as PDF.")
-        return False
-    download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
+    # Download latest Google Doc as PDF and DOCX
+    pdf_success = download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH)
+    docx_success = download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
+      
+    if not (pdf_success and docx_success):
+       st.error("Failed to download Google Doc as PDF or DOCX.")
+       return False
+      
+      # Extract labeled images
+      extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
 
    # 3. Extract labeled images
     extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
