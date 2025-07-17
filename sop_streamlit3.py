@@ -75,6 +75,7 @@ GITHUB_PDF_NAME = "Live_GTI_SOP.pdf"
 GITHUB_REPO = "FadeevMax/SOP_sales_chatbot"
 GITHUB_TOKEN = st.secrets["GitHub_API"]
 GOOGLE_DOC_NAME = "GTI Data Base and SOP"
+STATE_DIR = "user_data"
 
 def get_gdoc_last_modified(creds, doc_name):
     drive_service = build('drive', 'v3', credentials=creds)
