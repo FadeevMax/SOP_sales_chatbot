@@ -76,7 +76,56 @@ GITHUB_REPO = "FadeevMax/SOP_sales_chatbot"
 GITHUB_TOKEN = st.secrets["GitHub_API"]
 GOOGLE_DOC_NAME = "GTI Data Base and SOP"
 STATE_DIR = "user_data"
+DOCX_LOCAL_PATH = os.path.join(CACHE_DIR, "sop.docx")
+IMAGE_DIR = os.path.join(CACHE_DIR, "images")
+IMAGE_MAP_PATH = os.path.join(CACHE_DIR, "image_map.json")
 
+def download_gdoc_as_docx(doc_id, creds, out_path):
+   drive_service = build('drive', 'v3', credentials=creds)
+   request = drive_service.files().export_media(fileId=doc_id, mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+   with open(out_path, "wb") as f:
+     f.write(request.execute())
+   return True
+
+def maybe_show_referenced_images(answer_text):
+    try:
+        image_dir = os.path.join(CACHE_DIR, "images")
+        image_map_path = os.path.join(CACHE_DIR, "image_map.json")
+        if not os.path.exists(image_map_path):
+            return
+        with open(image_map_path, "r") as f:
+            image_map = json.load(f)
+        for caption, filename in image_map.items():
+            if caption.lower() in answer_text.lower():
+                image_path = os.path.join(image_dir, filename)
+                if os.path.exists(image_path):
+                    st.image(image_path, caption=caption)
+    except Exception as e:
+        st.warning(f"Could not load referenced image: {e}")
+
+# ✅ Outside the function — this is now correct:
+user_input = st.chat_input("Ask your question here...")
+   if user_input:
+       try:
+           selected_thread_info["messages"].append({"user": user_input, "assistant": ""})
+           with st.chat_message("user"): st.markdown(user_input)
+           client.beta.threads.messages.create(thread_id=selected_thread_info["thread_id"], role="user", content=user_input)
+           run = client.beta.threads.runs.create_and_poll(thread_id=selected_thread_info["thread_id"], assistant_id=st.session_state.assistant_id)
+           if run.status == 'completed':
+               messages = client.beta.threads.messages.list(thread_id=selected_thread_info["thread_id"])
+               assistant_reply = next((m.content[0].text.value for m in messages.data if m.role == "assistant"), "Sorry, I couldn't get a response.")
+               selected_thread_info["messages"][-1]["assistant"] = assistant_reply
+               with st.chat_message("assistant"): 
+                  st.markdown(assistant_reply)
+                  maybe_show_referenced_images(assistant_reply)
+               save_app_state(st.session_state.user_id)
+           else:
+               st.error(f"❌ Run failed with status: {run.status}")
+               selected_thread_info["messages"].pop()
+       except Exception as e:
+           st.error(f"❌ Error processing your request: {str(e)}")
+           st.session_state.assistant_setup_complete = False
+           if selected_thread_info["messages"]: selected_thread_info["messages"].pop()
 def get_gdoc_last_modified(creds, doc_name):
     drive_service = build('drive', 'v3', credentials=creds)
     query = f"name='{doc_name}' and mimeType='application/vnd.google-apps.document'"
@@ -156,6 +205,10 @@ def sync_gdoc_to_github(force=False):
     if not download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH):
         st.error("Failed to download Google Doc as PDF.")
         return False
+    download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
+
+   # 3. Extract labeled images
+   extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
     # Upload to GitHub
     if update_pdf_on_github(PDF_CACHE_PATH):
         st.success("PDF updated on GitHub with the latest from Google Doc!")
@@ -164,7 +217,46 @@ def sync_gdoc_to_github(force=False):
     else:
         st.error("Failed to update PDF on GitHub.")
         return False
-       
+
+from docx import Document
+import re
+
+def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path):
+    if not os.path.exists(image_output_dir):
+        os.makedirs(image_output_dir)
+
+    doc = Document(docx_path)
+    image_map = {}
+    img_index = 1
+
+    for i, rel in enumerate(doc.part._rels):
+        rel = doc.part._rels[rel]
+        if "image" in rel.target_ref:
+            image_data = rel.target_part.blob
+            image_name = f"image_{img_index}.png"
+            image_path = os.path.join(image_output_dir, image_name)
+
+            with open(image_path, "wb") as img_file:
+                img_file.write(image_data)
+
+            # Try to get caption from next paragraph
+            caption = f"Image {img_index}"
+            for para in doc.paragraphs:
+                match = re.match(rf"Image {img_index}:(.+)", para.text.strip())
+                if match:
+                    caption = f"Image {img_index}:{match.group(1).strip()}"
+                    break
+
+            image_map[caption] = image_name
+            img_index += 1
+
+    # Save mapping to a .json file
+    with open(mapping_output_path, "w") as f:
+        json.dump(image_map, f, indent=2)
+
+    return image_map
+
+
 # --- Functions for User and State Management (No changes here) ---
 def get_persistent_user_id(local_storage: LocalStorage) -> str:
     user_id = local_storage.getItem("user_id")
@@ -514,27 +606,7 @@ def run_main_app():
             for msg in selected_thread_info['messages']:
                 with st.chat_message("user"): st.markdown(msg["user"])
                 with st.chat_message("assistant"): st.markdown(msg["assistant"])
-
-            user_input = st.chat_input("Ask your question here...")
-            if user_input:
-                try:
-                    selected_thread_info["messages"].append({"user": user_input, "assistant": ""})
-                    with st.chat_message("user"): st.markdown(user_input)
-                    client.beta.threads.messages.create(thread_id=selected_thread_info["thread_id"], role="user", content=user_input)
-                    run = client.beta.threads.runs.create_and_poll(thread_id=selected_thread_info["thread_id"], assistant_id=st.session_state.assistant_id)
-                    if run.status == 'completed':
-                        messages = client.beta.threads.messages.list(thread_id=selected_thread_info["thread_id"])
-                        assistant_reply = next((m.content[0].text.value for m in messages.data if m.role == "assistant"), "Sorry, I couldn't get a response.")
-                        selected_thread_info["messages"][-1]["assistant"] = assistant_reply
-                        with st.chat_message("assistant"): st.markdown(assistant_reply)
-                        save_app_state(st.session_state.user_id)
-                    else:
-                        st.error(f"❌ Run failed with status: {run.status}")
-                        selected_thread_info["messages"].pop()
-                except Exception as e:
-                    st.error(f"❌ Error processing your request: {str(e)}")
-                    st.session_state.assistant_setup_complete = False
-                    if selected_thread_info["messages"]: selected_thread_info["messages"].pop()
+         
         else:
             st.info("Start a new thread to begin chatting.")
 
