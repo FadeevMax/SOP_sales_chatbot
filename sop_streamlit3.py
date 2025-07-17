@@ -590,9 +590,9 @@ def run_main_app():
                   save_app_state(st.session_state.user_id)
                   st.rerun()
       
-              st.subheader("💬 Ask your question about the GTI SOP")
+             st.subheader("💬 Ask your question about the GTI SOP")
       
-              if selected_thread_info:
+             if selected_thread_info:
                   st.info(f"🔧 Current: {selected_thread_info.get('model', 'unknown')} | {selected_thread_info.get('instruction_name', 'unknown')}")
       
                   for msg in selected_thread_info['messages']:
