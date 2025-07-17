@@ -89,6 +89,108 @@ DOCX_LOCAL_PATH = os.path.join(CACHE_DIR, "sop.docx")
 IMAGE_DIR = os.path.join(CACHE_DIR, "images")
 IMAGE_MAP_PATH = os.path.join(CACHE_DIR, "image_map.json")
 
+from docx import Document
+import os
+import re
+import json
+
+def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
+    """
+    Extracts images and their captions from a docx, saves each image,
+    and creates a mapping JSON. Robust to all caption/image order.
+    """
+    if not os.path.exists(image_output_dir):
+        os.makedirs(image_output_dir)
+
+    doc = Document(docx_path)
+    image_map = {}
+    img_index = 1
+    para_idx = 0
+    paragraphs = doc.paragraphs
+
+    # For debug
+    debug_info = []
+
+    # Inline shape extraction for ordering
+    img_rel_order = []
+    for shape in doc.inline_shapes:
+        rId = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
+        img_rel_order.append((rId, img_index))
+        img_index += 1
+
+    img_index = 1
+    rel_id_to_image_name = {}
+
+    # Save images to disk and remember their doc order
+    for rel in doc.part._rels.values():
+        if "image" in rel.target_ref:
+            rel_id = rel.rId
+            for (rId, idx) in img_rel_order:
+                if rel_id == rId:
+                    image_data = rel.target_part.blob
+                    image_name = f"image_{idx}.png"
+                    image_path = os.path.join(image_output_dir, image_name)
+                    with open(image_path, "wb") as img_file:
+                        img_file.write(image_data)
+                    rel_id_to_image_name[idx] = image_name
+                    debug_info.append(f"Extracted {image_name}")
+                    break
+
+    # Map captions to images (using doc order)
+    used_imgs = set()
+    for i, para in enumerate(paragraphs):
+        text = para.text.strip()
+        match = re.match(r'Image\s*(\d+)\s*([.:]?)\s*(.*)', text, re.IGNORECASE)
+        if match:
+            img_idx = int(match.group(1))
+            desc = match.group(3).strip()
+            if desc:
+                caption = f"Image {img_idx}: {desc}"
+            else:
+                caption = f"Image {img_idx}"
+            image_name = rel_id_to_image_name.get(img_idx, f"image_{img_idx}.png")
+            image_map[caption] = image_name
+            used_imgs.add(img_idx)
+            debug_info.append(f"Mapped caption '{caption}' to {image_name}")
+
+    # Map images that have no caption
+    for idx, image_name in rel_id_to_image_name.items():
+        if idx not in used_imgs:
+            caption = f"Image {idx}"
+            image_map[caption] = image_name
+            debug_info.append(f"No caption found for image {image_name}, used '{caption}'")
+
+    with open(mapping_output_path, "w") as f:
+        json.dump(image_map, f, indent=2)
+    if debug:
+        print("\n".join(debug_info))
+    return image_map
+
+def update_json_on_github(local_json_path, repo_json_path, commit_message):
+    import base64, requests, os
+    GITHUB_REPO = "FadeevMax/SOP_sales_chatbot"
+    GITHUB_TOKEN = st.secrets["GitHub_API"]
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{repo_json_path}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    # Get SHA for overwrite
+    r = requests.get(url, headers=headers)
+    sha = r.json().get("sha") if r.status_code == 200 else None
+    # Encode file
+    with open(local_json_path, "rb") as f:
+        content = base64.b64encode(f.read()).decode()
+    data = {
+        "message": commit_message,
+        "content": content,
+        "sha": sha
+    }
+    resp = requests.put(url, headers=headers, json=data)
+    if resp.status_code in [200, 201]:
+        print("✅ image_map.json updated successfully!")
+        return True
+    else:
+        print(f"❌ Failed to update image_map.json: {resp.text}")
+        return False
+
 def load_image_map_from_github():
     """
     Downloads image_map.json directly from GitHub and returns as a Python dict.
@@ -248,12 +350,14 @@ def sync_gdoc_to_github(force=False):
        return False
 
     # Extract labeled images from DOCX
-    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
-    json_uploaded = upload_file_to_github(
-    IMAGE_MAP_PATH,
-    "image_map.json",
-    "Update image_map.json from SOP DOCX"
-)
+    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH, debug=True)
+    success = update_json_on_github(
+        IMAGE_MAP_PATH,
+        "image_map.json",
+        "Update image_map.json from SOP DOCX"
+    )
+    if not success:
+       st.error("❌ Failed to update image_map.json on GitHub!")
     # Upload images to GitHub
     for image_file in os.listdir(IMAGE_DIR):
        local_image_path = os.path.join(IMAGE_DIR, image_file)
