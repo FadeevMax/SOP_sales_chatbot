@@ -285,38 +285,73 @@ from docx import Document
 import re
 
 def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path):
+    """
+    Extracts images and their captions from a docx, saves each image,
+    and creates a mapping JSON. Captions are the first paragraph after each image
+    that matches 'Image X[.:]? ...' or just 'Image X'.
+    """
+    import re
+    from docx import Document
+
     if not os.path.exists(image_output_dir):
         os.makedirs(image_output_dir)
 
     doc = Document(docx_path)
     image_map = {}
     img_index = 1
+    para_idx = 0
+    paragraphs = doc.paragraphs
 
-    for i, rel in enumerate(doc.part._rels):
-        rel = doc.part._rels[rel]
+    # Map: relationship id -> (blob, index in doc inline shapes)
+    img_rel_order = []
+    for shape in doc.inline_shapes:
+        # Find the rel id for this shape
+        rId = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
+        img_rel_order.append((rId, img_index))
+        img_index += 1
+
+    img_index = 1
+    rel_id_to_image_name = {}
+
+    # Save images to disk and remember their doc order
+    for rel in doc.part._rels.values():
         if "image" in rel.target_ref:
-            image_data = rel.target_part.blob
-            image_name = f"image_{img_index}.png"
-            image_path = os.path.join(image_output_dir, image_name)
-
-            with open(image_path, "wb") as img_file:
-                img_file.write(image_data)
-
-            # Try to get caption from next paragraph
-            caption = f"Image {img_index}"
-            for para in doc.paragraphs:
-                match = re.match(rf"Image {img_index}:(.+)", para.text.strip())
-                if match:
-                    caption = f"Image {img_index}:{match.group(1).strip()}"
+            # Find this rel id in order list
+            rel_id = rel.rId
+            for (rId, idx) in img_rel_order:
+                if rel_id == rId:
+                    image_data = rel.target_part.blob
+                    image_name = f"image_{idx}.png"
+                    image_path = os.path.join(image_output_dir, image_name)
+                    with open(image_path, "wb") as img_file:
+                        img_file.write(image_data)
+                    rel_id_to_image_name[idx] = image_name
                     break
 
+    # Go through all paragraphs, find those that match 'Image X' and map to image order
+    used_imgs = set()
+    for i, para in enumerate(paragraphs):
+        text = para.text.strip()
+        match = re.match(r'Image\s*(\d+)\s*([.:]?)\s*(.*)', text, re.IGNORECASE)
+        if match:
+            img_idx = int(match.group(1))
+            desc = match.group(3).strip()
+            if desc:
+                caption = f"Image {img_idx}: {desc}"
+            else:
+                caption = f"Image {img_idx}"
+            image_name = rel_id_to_image_name.get(img_idx, f"image_{img_idx}.png")
             image_map[caption] = image_name
-            img_index += 1
+            used_imgs.add(img_idx)
 
-    # Save mapping to a .json file
+    # If any images were not mapped, add them with default captions
+    for idx, image_name in rel_id_to_image_name.items():
+        if idx not in used_imgs:
+            caption = f"Image {idx}"
+            image_map[caption] = image_name
+
     with open(mapping_output_path, "w") as f:
         json.dump(image_map, f, indent=2)
-
     return image_map
 
 
