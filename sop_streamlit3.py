@@ -576,77 +576,75 @@ def run_main_app():
             selected_thread_info = st.session_state.threads[selected_idx]
             st.session_state.thread_id = selected_thread_info['thread_id']
 
-        if st.sidebar.button("➕ Start New Thread"):
-             thread = client.beta.threads.create()
-             new_thread_obj = {
-                 "thread_id": thread.id,
-                 "messages": [],
-                 "start_time": datetime.now().isoformat(),
-                 "model": st.session_state.model,
-                 "instruction_name": st.session_state.current_instruction_name
-             }
-             st.session_state.threads.append(new_thread_obj)
-             st.session_state.thread_id = thread.id
-             save_app_state(st.session_state.user_id)
-             st.rerun()
-         
-         st.subheader("💬 Ask your question about the GTI SOP")
-         
-         if selected_thread_info:
-             # ✅ Show current thread metadata
-             st.info(f"🔧 Current: {selected_thread_info.get('model', 'unknown')} | {selected_thread_info.get('instruction_name', 'unknown')}")
-         
-             # ✅ Display full message history
-             for msg in selected_thread_info['messages']:
-                 with st.chat_message("user"):
-                     st.markdown(msg["user"])
-                 with st.chat_message("assistant"):
-                     st.markdown(msg["assistant"])
-         
-             # ✅ Show chat input
-             user_input = st.chat_input("Ask your question here...")
-         
-             if user_input:
-                 try:
-                     selected_thread_info["messages"].append({"user": user_input, "assistant": ""})
-                     with st.chat_message("user"):
-                         st.markdown(user_input)
-         
-                     # Send message to assistant
-                     client.beta.threads.messages.create(
-                         thread_id=selected_thread_info["thread_id"],
-                         role="user",
-                         content=user_input
-                     )
-                     run = client.beta.threads.runs.create_and_poll(
-                         thread_id=selected_thread_info["thread_id"],
-                         assistant_id=st.session_state.assistant_id
-                     )
-         
-                     if run.status == 'completed':
-                         messages = client.beta.threads.messages.list(thread_id=selected_thread_info["thread_id"])
-                         assistant_reply = next(
-                             (m.content[0].text.value for m in messages.data if m.role == "assistant"),
-                             "Sorry, I couldn't get a response."
-                         )
-                         selected_thread_info["messages"][-1]["assistant"] = assistant_reply
-                         with st.chat_message("assistant"):
-                             st.markdown(assistant_reply)
-                             maybe_show_referenced_images(assistant_reply)
-         
-                         save_app_state(st.session_state.user_id)
-         
-                     else:
-                         st.error(f"❌ Run failed with status: {run.status}")
-                         selected_thread_info["messages"].pop()
-         
-                 except Exception as e:
-                     st.error(f"❌ Error processing your request: {str(e)}")
-                     st.session_state.assistant_setup_complete = False
-                     if selected_thread_info["messages"]:
-                         selected_thread_info["messages"].pop()
-         else:
-             st.info("Start a new thread to begin chatting.")
+                if st.sidebar.button("➕ Start New Thread"):
+            thread = client.beta.threads.create()
+            new_thread_obj = {
+                "thread_id": thread.id,
+                "messages": [],
+                "start_time": datetime.now().isoformat(),
+                "model": st.session_state.model,
+                "instruction_name": st.session_state.current_instruction_name
+            }
+            st.session_state.threads.append(new_thread_obj)
+            st.session_state.thread_id = thread.id
+            save_app_state(st.session_state.user_id)
+            st.rerun()
+
+        st.subheader("💬 Ask your question about the GTI SOP")
+
+        if selected_thread_info:
+            st.info(f"🔧 Current: {selected_thread_info.get('model', 'unknown')} | {selected_thread_info.get('instruction_name', 'unknown')}")
+
+            for msg in selected_thread_info['messages']:
+                with st.chat_message("user"):
+                    st.markdown(msg["user"])
+                with st.chat_message("assistant"):
+                    st.markdown(msg["assistant"])
+
+            user_input = st.chat_input("Ask your question here...")
+
+            if user_input:
+                try:
+                    selected_thread_info["messages"].append({"user": user_input, "assistant": ""})
+                    with st.chat_message("user"):
+                        st.markdown(user_input)
+
+                    client.beta.threads.messages.create(
+                        thread_id=selected_thread_info["thread_id"],
+                        role="user",
+                        content=user_input
+                    )
+
+                    run = client.beta.threads.runs.create_and_poll(
+                        thread_id=selected_thread_info["thread_id"],
+                        assistant_id=st.session_state.assistant_id
+                    )
+
+                    if run.status == 'completed':
+                        messages = client.beta.threads.messages.list(thread_id=selected_thread_info["thread_id"])
+                        assistant_reply = next(
+                            (m.content[0].text.value for m in messages.data if m.role == "assistant"),
+                            "Sorry, I couldn't get a response."
+                        )
+                        selected_thread_info["messages"][-1]["assistant"] = assistant_reply
+                        with st.chat_message("assistant"):
+                            st.markdown(assistant_reply)
+                            maybe_show_referenced_images(assistant_reply)
+
+                        save_app_state(st.session_state.user_id)
+
+                    else:
+                        st.error(f"❌ Run failed with status: {run.status}")
+                        selected_thread_info["messages"].pop()
+
+                except Exception as e:
+                    st.error(f"❌ Error processing your request: {str(e)}")
+                    st.session_state.assistant_setup_complete = False
+                    if selected_thread_info["messages"]:
+                        selected_thread_info["messages"].pop()
+        else:
+            st.info("Start a new thread to begin chatting.")
+
 
 # ======================================================================
 # --- SCRIPT EXECUTION STARTS HERE ---
