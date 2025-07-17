@@ -221,26 +221,26 @@ def sync_gdoc_to_github(force=False):
        st.error("Failed to download Google Doc as PDF or DOCX.")
        return False
 
-# Extract labeled images from DOCX
-extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
-
-# Upload PDF and DOCX to GitHub
-pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
-docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
-
-if pdf_uploaded and docx_uploaded:
-    st.success("PDF and DOCX updated on GitHub with the latest from Google Doc!")
-    set_last_gdoc_synced_time(modified_time)
-    return True
-elif pdf_uploaded:
-    st.error("PDF uploaded, but failed to update DOCX on GitHub.")
-    return False
-elif docx_uploaded:
-    st.error("DOCX uploaded, but failed to update PDF on GitHub.")
-    return False
-else:
-    st.error("Failed to update both PDF and DOCX on GitHub.")
-    return False
+    # Extract labeled images from DOCX
+    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
+   
+    # Upload PDF and DOCX to GitHub
+    pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
+    docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
+   
+    if pdf_uploaded and docx_uploaded:
+        st.success("PDF and DOCX updated on GitHub with the latest from Google Doc!")
+        set_last_gdoc_synced_time(modified_time)
+        return True
+    elif pdf_uploaded:
+        st.error("PDF uploaded, but failed to update DOCX on GitHub.")
+        return False
+    elif docx_uploaded:
+        st.error("DOCX uploaded, but failed to update PDF on GitHub.")
+        return False
+    else:
+        st.error("Failed to update both PDF and DOCX on GitHub.")
+        return False
 
 from docx import Document
 import re
