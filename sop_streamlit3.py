@@ -441,53 +441,53 @@ def run_main_app():
         # --- MODIFIED: Assistant Setup with Google Docs ---
         if not st.session_state.get('assistant_setup_complete', False):
             try:
-        # Always use the local cached PDF path from your GitHub sync!
-        if PDF_CACHE_PATH and os.path.exists(PDF_CACHE_PATH):
-            st.session_state.file_path = PDF_CACHE_PATH
-        else:
-            st.error("Could not retrieve the SOP PDF. Assistant setup failed.")
-            st.stop()
-
-        with st.spinner("Setting up AI assistant with the latest data..."):
-            client = OpenAI(api_key=st.session_state.api_key)
-            # 1. Upload PDF
-            file_response = client.files.create(file=open(st.session_state.file_path, "rb"), purpose="assistants")
-            file_id = file_response.id
-
-            # 2. Create Vector Store, upload PDF to it
-            vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
-            client.vector_stores.file_batches.create_and_poll(
-                vector_store_id=vector_store.id, file_ids=[file_id]
-            )
-
-            # 3. Create Assistant using the vector store
-            assistant = client.beta.assistants.create(
-                name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
-                instructions=st.session_state.instructions,
-                model=st.session_state.model,
-                tools=[{"type": "file_search"}],
-                tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}}
-            )
-            st.session_state.assistant_id = assistant.id
-
-            # 4. Setup thread
-            if not st.session_state.threads:
-                thread = client.beta.threads.create()
-                st.session_state.threads.append({
-                    "thread_id": thread.id,
-                    "messages": [],
-                    "start_time": datetime.now().isoformat(),
-                    "model": st.session_state.model,
-                    "instruction_name": st.session_state.current_instruction_name
-                })
-                st.session_state.thread_id = thread.id
-                save_app_state(st.session_state.user_id)
-
-            st.session_state.assistant_setup_complete = True
-            st.success("✅ Assistant is ready with the latest information!")
-    except Exception as e:
-        st.error(f"❌ Error setting up assistant: {str(e)}")
-        st.stop()
+                 # Always use the local cached PDF path from your GitHub sync!
+                 if PDF_CACHE_PATH and os.path.exists(PDF_CACHE_PATH):
+                     st.session_state.file_path = PDF_CACHE_PATH
+                 else:
+                     st.error("Could not retrieve the SOP PDF. Assistant setup failed.")
+                     st.stop()
+         
+                 with st.spinner("Setting up AI assistant with the latest data..."):
+                     client = OpenAI(api_key=st.session_state.api_key)
+                     # 1. Upload PDF
+                     file_response = client.files.create(file=open(st.session_state.file_path, "rb"), purpose="assistants")
+                     file_id = file_response.id
+         
+                     # 2. Create Vector Store, upload PDF to it
+                     vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
+                     client.vector_stores.file_batches.create_and_poll(
+                         vector_store_id=vector_store.id, file_ids=[file_id]
+                     )
+         
+                     # 3. Create Assistant using the vector store
+                     assistant = client.beta.assistants.create(
+                         name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
+                         instructions=st.session_state.instructions,
+                         model=st.session_state.model,
+                         tools=[{"type": "file_search"}],
+                         tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}}
+                     )
+                     st.session_state.assistant_id = assistant.id
+         
+                     # 4. Setup thread
+                     if not st.session_state.threads:
+                         thread = client.beta.threads.create()
+                         st.session_state.threads.append({
+                             "thread_id": thread.id,
+                             "messages": [],
+                             "start_time": datetime.now().isoformat(),
+                             "model": st.session_state.model,
+                             "instruction_name": st.session_state.current_instruction_name
+                         })
+                         st.session_state.thread_id = thread.id
+                         save_app_state(st.session_state.user_id)
+         
+                     st.session_state.assistant_setup_complete = True
+                     st.success("✅ Assistant is ready with the latest information!")
+             except Exception as e:
+                 st.error(f"❌ Error setting up assistant: {str(e)}")
+                 st.stop()
         
         client = OpenAI(api_key=st.session_state.api_key)
         st.sidebar.subheader("🧵 Your Threads")
