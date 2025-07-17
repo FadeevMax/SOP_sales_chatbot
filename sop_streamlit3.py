@@ -67,7 +67,15 @@ However, there are several key conditions and rules you must follow for both **G
 ### :warning: Specific Rules for MD **General Stores**:
 * **Loose Units:** You can add loose units if a full case is not available. [cite: 2] For Western and Moco accounts, you should prioritize using loose units. [cite: 2]
 * **Flower Page:** Always confirm if you should add the flower page from an order. [cite: 2]
-* **Limited Availability:** If an item has limited stock (e.g., request for 25, only 11 available), you can add the available amount as long as it's **9 units or more**. [cite: 2] If it's less than 9, do not add it. [cite: 2]"""
+* **Limited Availability:** If an item has limited stock (e.g., request for 25, only 11 available), you can add the available amount as long as it's **9 units or more**. [cite: 2] If it's less than 9, do not add it. [cite: 2]
+IMPORTANT:
+When answering questions, consider whether any labeled screenshots or images may help illustrate your response. Each image has a descriptive caption. If an image matches or supports the answer, mention the relevant caption or concept in your reply.
+
+You do not need to embed the image yourself — simply write the relevant text naturally. A separate system will match your response with available image captions and display the correct image if one exists.
+
+Be specific when referring to actions or visual elements. For example, say "see the screenshot labeled 'Update Customer Tags in Portal'" if that matches the user’s question.
+
+"""
 CACHE_DIR = "cache"
 PDF_CACHE_PATH = os.path.join(CACHE_DIR, "cached_sop.pdf")
 GDOC_STATE_PATH = os.path.join(CACHE_DIR, "gdoc_state.json")
