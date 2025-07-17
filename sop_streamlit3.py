@@ -130,25 +130,45 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
                     f.write(image_data)
                 index_to_filename[idx] = image_name
 
-    # Scan paragraphs for captions
+    # Scan paragraphs for captions - improved regex pattern
     caption_map = {}
     for para in doc.paragraphs:
         text = para.text.strip()
-        # Normalize weird unicode
+        if not text:
+            continue
+            
+        # Clean up the text first
         cleaned = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
-        match = re.match(r"Image\s*(\d+)\s*[.:]?\s*(.*)", cleaned, re.IGNORECASE)
-        if match:
-            idx = int(match.group(1))
-            desc = match.group(2).strip()
-            caption = f"Image {idx}: {desc}" if desc else f"Image {idx}"
-            caption_map[idx] = caption
+        
+        # Try multiple patterns to match captions
+        patterns = [
+            r"Image\s*(\d+)\s*[.:]?\s*(.*)",  # Original pattern
+            r"\*Image\s*(\d+)\s*[.:]?\s*(.*?)\*",  # Pattern for *Image X. caption*
+            r"Image\s*(\d+)\s*[.:]?\s*(.+?)(?:\*|$)",  # Pattern that stops at * or end
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, cleaned, re.IGNORECASE)
+            if match:
+                idx = int(match.group(1))
+                desc = match.group(2).strip()
+                
+                # Clean up description
+                desc = re.sub(r'[^\w\s\-.,!?()/:"]', '', desc)  # Remove weird characters
+                desc = desc.strip()
+                
+                if desc:
+                    caption = f"Image {idx}: {desc}"
+                else:
+                    caption = f"Image {idx}"
+                
+                caption_map[idx] = caption
+                break
 
     # Combine data
-    used = set()
     for idx, image_name in index_to_filename.items():
         caption = caption_map.get(idx, f"Image {idx}")
         image_map[caption] = image_name
-        used.add(idx)
 
     with open(mapping_output_path, "w") as f:
         json.dump(image_map, f, indent=2)
@@ -159,6 +179,80 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
             print(f"{caption} => {img}")
 
     return image_map
+
+def sync_gdoc_to_github(force=False):
+    # Only check if a day has passed or force=True
+    last_synced = get_last_gdoc_synced_time()
+    now = datetime.utcnow()
+    last_checked_dt = datetime.fromisoformat(last_synced) if last_synced else None
+
+    # Google API Auth
+    scopes = ['https://www.googleapis.com/auth/drive.readonly']
+    creds_dict = st.secrets["gcp_service_account"]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    doc_id, modified_time = get_gdoc_last_modified(creds, GOOGLE_DOC_NAME)
+    if not doc_id or not modified_time:
+        st.warning("Google Doc not found or can't fetch modified time.")
+        return False
+
+    # Only update if new or forced or more than 1 day has passed
+    need_update = (
+        force or 
+        not last_synced or 
+        (now - last_checked_dt > timedelta(days=1)) or
+        (modified_time != last_synced)
+    )
+    if not need_update:
+        st.info("No update needed. Using existing GitHub PDF.")
+        return True
+
+    # Download latest Google Doc as PDF and DOCX
+    pdf_success = download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH)
+    docx_success = download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
+      
+    if not (pdf_success and docx_success):
+       st.error("Failed to download Google Doc as PDF or DOCX.")
+       return False
+
+    # Extract labeled images from DOCX
+    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH, debug=True)
+    
+    # Update map.json on GitHub
+    success = update_json_on_github(
+        IMAGE_MAP_PATH,
+        "map.json",
+        "Update map.json from SOP DOCX"
+    )
+    if not success:
+       st.error("❌ Failed to update map.json on GitHub!")
+       
+    # Upload images to GitHub
+    for file in os.listdir(IMAGE_DIR):
+       local_path = os.path.join(IMAGE_DIR, file)
+       github_path = f"images/{file}"
+       upload_file_to_github(
+          local_path,
+          github_path,
+          f"Update {file} from SOP DOCX"
+          )
+          
+    # Upload PDF and DOCX to GitHub
+    pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
+    docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
+   
+    if pdf_uploaded and docx_uploaded:
+        st.success("PDF and DOCX updated on GitHub with the latest from Google Doc!")
+        set_last_gdoc_synced_time(modified_time)
+        return True
+    elif pdf_uploaded:
+        st.error("PDF uploaded, but failed to update DOCX on GitHub.")
+        return False
+    elif docx_uploaded:
+        st.error("DOCX uploaded, but failed to update PDF on GitHub.")
+        return False
+    else:
+        st.error("Failed to update both PDF and DOCX on GitHub.")
+        return False
 
 def update_json_on_github(local_json_path, repo_json_path, commit_message):
     import base64, requests, os
@@ -307,67 +401,6 @@ def update_pdf_on_github(local_pdf_path):
     }
     resp = requests.put(url, headers=headers, json=data)
     return resp.status_code in [200, 201]
-
-def sync_gdoc_to_github(force=False):
-    # Only check if a day has passed or force=True
-    last_synced = get_last_gdoc_synced_time()
-    now = datetime.utcnow()
-    last_checked_dt = datetime.fromisoformat(last_synced) if last_synced else None
-
-    # Google API Auth
-    scopes = ['https://www.googleapis.com/auth/drive.readonly']
-    creds_dict = st.secrets["gcp_service_account"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    doc_id, modified_time = get_gdoc_last_modified(creds, GOOGLE_DOC_NAME)
-    if not doc_id or not modified_time:
-        st.warning("Google Doc not found or can't fetch modified time.")
-        return False
-
-    # Only update if new or forced or more than 1 day has passed
-    need_update = (
-        force or 
-        not last_synced or 
-        (now - last_checked_dt > timedelta(days=1)) or
-        (modified_time != last_synced)
-    )
-    if not need_update:
-        st.info("No update needed. Using existing GitHub PDF.")
-        return True
-
-    # Download latest Google Doc as PDF
-    # Download latest Google Doc as PDF and DOCX
-    pdf_success = download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH)
-    docx_success = download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
-      
-    if not (pdf_success and docx_success):
-       st.error("Failed to download Google Doc as PDF or DOCX.")
-       return False
-
-    # Extract labeled images from DOCX
-    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, DIR, MAP_PATH, debug=True)
-    success = update_json_on_github(
-        MAP_PATH,
-        "map.json",
-        "Update map.json from SOP DOCX"
-    )
-    if not success:
-       st.error("❌ Failed to update map.json on GitHub!")
-    # Upload images to GitHub
-    for file in os.listdir(DIR):
-       local_path = os.path.join(DIR, file)
-       github_path = f"images/{file}"
-       upload_file_to_github(
-          local_path,
-          github_path,
-          f"Update {file} from SOP DOCX"
-          )
-    # Upload PDF and DOCX to GitHub
-    pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
-    docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
-   
-    if pdf_uploaded and docx_uploaded:
-        st.success("PDF and DOCX updated on GitHub with the latest from Google Doc!")
-        set_last_gdoc_synced_time(modified_time)
         return True
     elif pdf_uploaded:
         st.error("PDF uploaded, but failed to update DOCX on GitHub.")
