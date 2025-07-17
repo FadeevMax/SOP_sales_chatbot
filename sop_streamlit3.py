@@ -94,6 +94,72 @@ import os
 import re
 import json
 
+def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
+    from docx import Document
+    import re
+    import unicodedata
+
+    if not os.path.exists(image_output_dir):
+        os.makedirs(image_output_dir)
+
+    doc = Document(docx_path)
+    image_map = {}
+    rel_id_to_index = {}
+    index_to_filename = {}
+    idx_counter = 1
+
+    # Map inline shapes to index
+    for shape in doc.inline_shapes:
+        try:
+            rId = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
+            rel_id_to_index[rId] = idx_counter
+            idx_counter += 1
+        except Exception:
+            continue
+
+    # Save images to disk
+    for rel in doc.part._rels.values():
+        if "image" in rel.target_ref:
+            rel_id = rel.rId
+            idx = rel_id_to_index.get(rel_id)
+            if idx:
+                image_data = rel.target_part.blob
+                image_name = f"image_{idx}.png"
+                image_path = os.path.join(image_output_dir, image_name)
+                with open(image_path, "wb") as f:
+                    f.write(image_data)
+                index_to_filename[idx] = image_name
+
+    # Scan paragraphs for captions
+    caption_map = {}
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        # Normalize weird unicode
+        cleaned = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+        match = re.match(r"Image\s*(\d+)\s*[.:]?\s*(.*)", cleaned, re.IGNORECASE)
+        if match:
+            idx = int(match.group(1))
+            desc = match.group(2).strip()
+            caption = f"Image {idx}: {desc}" if desc else f"Image {idx}"
+            caption_map[idx] = caption
+
+    # Combine data
+    used = set()
+    for idx, image_name in index_to_filename.items():
+        caption = caption_map.get(idx, f"Image {idx}")
+        image_map[caption] = image_name
+        used.add(idx)
+
+    with open(mapping_output_path, "w") as f:
+        json.dump(image_map, f, indent=2)
+
+    if debug:
+        print("Final image_map:")
+        for caption, img in image_map.items():
+            print(f"{caption} => {img}")
+
+    return image_map
+
 def update_json_on_github(local_json_path, repo_json_path, commit_message):
     import base64, requests, os
     GITHUB_REPO = "FadeevMax/SOP_sales_chatbot"
@@ -119,17 +185,17 @@ def update_json_on_github(local_json_path, repo_json_path, commit_message):
         print(f"❌ Failed to update image_map.json: {resp.text}")
         return False
 
-def load_image_map_from_github():
+def load_map_from_github():
     """
-    Downloads image_map.json directly from GitHub and returns as a Python dict.
+    Downloads map.json directly from GitHub and returns as a Python dict.
     """
-    GITHUB_IMAGE_MAP_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/image_map.json"
+    GITHUB_MAP_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/map.json"
     try:
-        resp = requests.get(GITHUB_IMAGE_MAP_URL)
+        resp = requests.get(GITHUB_MAP_URL)
         if resp.status_code == 200:
             return resp.json()
         else:
-            st.warning("Could not fetch image_map.json from GitHub.")
+            st.warning("Could not fetch map.json from GitHub.")
             return {}
     except Exception as e:
         st.warning(f"Error loading image map from GitHub: {e}")
@@ -179,17 +245,17 @@ def download_gdoc_as_docx(doc_id, creds, out_path):
 
 def maybe_show_referenced_images(answer_text):
     try:
-        image_map = load_image_map_from_github()
-        if not image_map:
+        map = load_map_from_github()
+        if not map:
             return
 
-        for caption, filename in image_map.items():
+        for caption, filename in map.items():
             # Match using similarity or substring (you can tweak the matching as needed)
             similarity = difflib.SequenceMatcher(None, caption.lower(), answer_text.lower()).ratio()
             if similarity > 0.6 or caption.lower() in answer_text.lower():
                 # Build the GitHub raw image URL
-                github_image_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/images/{filename}"
-                st.image(github_image_url, caption=caption)
+                github_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/images/{filename}"
+                st.image(github_url, caption=caption)
     except Exception as e:
         st.warning(f"⚠️ Could not load referenced image: {e}")
 
@@ -278,22 +344,22 @@ def sync_gdoc_to_github(force=False):
        return False
 
     # Extract labeled images from DOCX
-    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH, debug=True)
+    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, DIR, MAP_PATH, debug=True)
     success = update_json_on_github(
-        IMAGE_MAP_PATH,
-        "image_map.json",
-        "Update image_map.json from SOP DOCX"
+        MAP_PATH,
+        "map.json",
+        "Update map.json from SOP DOCX"
     )
     if not success:
-       st.error("❌ Failed to update image_map.json on GitHub!")
+       st.error("❌ Failed to update map.json on GitHub!")
     # Upload images to GitHub
-    for image_file in os.listdir(IMAGE_DIR):
-       local_image_path = os.path.join(IMAGE_DIR, image_file)
-       github_image_path = f"images/{image_file}"
+    for file in os.listdir(DIR):
+       local_path = os.path.join(DIR, file)
+       github_path = f"images/{file}"
        upload_file_to_github(
-          local_image_path,
-          github_image_path,
-          f"Update {image_file} from SOP DOCX"
+          local_path,
+          github_path,
+          f"Update {file} from SOP DOCX"
           )
     # Upload PDF and DOCX to GitHub
     pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
@@ -312,71 +378,6 @@ def sync_gdoc_to_github(force=False):
     else:
         st.error("Failed to update both PDF and DOCX on GitHub.")
         return False
-
-from docx import Document
-import re
-
-def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
-    from docx import Document
-    import re
-
-    if not os.path.exists(image_output_dir):
-        os.makedirs(image_output_dir)
-
-    doc = Document(docx_path)
-    image_map = {}
-    img_index = 1
-
-    # Keep track of inline shapes and their rel IDs
-    inline_shapes = list(doc.inline_shapes)
-    rel_id_to_index = {}
-    for idx, shape in enumerate(inline_shapes, start=1):
-        rId = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
-        rel_id_to_index[rId] = idx
-
-    # Save images and build index->filename map
-    index_to_filename = {}
-    for rel in doc.part._rels.values():
-        if "image" in rel.target_ref:
-            rel_id = rel.rId
-            idx = rel_id_to_index.get(rel_id)
-            if idx:
-                image_data = rel.target_part.blob
-                image_name = f"image_{idx}.png"
-                image_path = os.path.join(image_output_dir, image_name)
-                with open(image_path, "wb") as img_file:
-                    img_file.write(image_data)
-                index_to_filename[idx] = image_name
-
-    # Parse paragraphs for captions
-    used = set()
-    for para in doc.paragraphs:
-        text = para.text.strip()
-        match = re.match(r"Image\s*(\d+)\s*[.:]?\s*(.*)", text, re.IGNORECASE)
-        if match:
-            idx = int(match.group(1))
-            label = match.group(2).strip()
-            caption = f"Image {idx}: {label}" if label else f"Image {idx}"
-            filename = index_to_filename.get(idx)
-            if filename:
-                image_map[caption] = filename
-                used.add(idx)
-
-    # Add uncaptured images
-    for idx, filename in index_to_filename.items():
-        if idx not in used:
-            caption = f"Image {idx}"
-            image_map[caption] = filename
-
-    with open(mapping_output_path, "w") as f:
-        json.dump(image_map, f, indent=2)
-
-    if debug:
-        print("Extracted image map:")
-        for k, v in image_map.items():
-            print(f"{k}: {v}")
-
-    return image_map
 
 
 # --- Functions for User and State Management (No changes here) ---
