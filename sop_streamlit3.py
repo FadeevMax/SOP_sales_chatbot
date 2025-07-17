@@ -192,7 +192,7 @@ def sync_gdoc_to_github(force=False):
     download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
 
    # 3. Extract labeled images
-   extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
+    extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH)
     # Upload to GitHub
     if update_pdf_on_github(PDF_CACHE_PATH):
         st.success("PDF updated on GitHub with the latest from Google Doc!")
