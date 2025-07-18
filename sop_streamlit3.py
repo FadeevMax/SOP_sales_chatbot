@@ -100,77 +100,82 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
 
     doc = Document(docx_path)
     image_map = {}
-    rel_id_to_index = {}
-    index_to_filename = {}
-    idx_counter = 1
-
-    # --- STEP 1: Map images by relId to index ---
-    for shape in doc.inline_shapes:
-        try:
-            rId = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
-            rel_id_to_index[rId] = idx_counter
-            idx_counter += 1
-        except Exception:
-            continue
-
-    # --- STEP 2: Save images to disk ---
-    for rel in doc.part._rels.values():
-        if "image" in rel.target_ref:
-            rel_id = rel.rId
-            idx = rel_id_to_index.get(rel_id)
-            if idx:
-                image_data = rel.target_part.blob
-                image_name = f"image_{idx}.png"
-                image_path = os.path.join(image_output_dir, image_name)
-                with open(image_path, "wb") as f:
-                    f.write(image_data)
-                index_to_filename[idx] = image_name
-
-    # --- STEP 3: Gather all paragraphs including from tables ---
-    paragraphs = list(doc.paragraphs)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                paragraphs.extend(cell.paragraphs)
-
-    # --- STEP 4: Match captions ---
-    caption_map = {}
+    image_counter = 1
     caption_patterns = [
         r"Image\s*(\d+)[\s\-–—:]*\s*(.*)",
         r"\bIMG\s*(\d+)[\s\-–—:]*\s*(.*)",
         r"\*?Image\s*(\d+)[\s\-–—:]*\s*(.*?)\*?",
     ]
 
-    for para in paragraphs:
-        text = para.text.strip()
-        if not text:
-            continue
-
-        # Normalize text
+    # Helper: Clean caption text
+    def clean_caption(text):
         cleaned = unicodedata.normalize('NFKC', text)
         cleaned = cleaned.replace("–", "-").replace("—", "-")
         cleaned = cleaned.replace("“", '"').replace("”", '"')
         cleaned = cleaned.replace("‘", "'").replace("’", "'")
+        return cleaned.strip()
 
+    # Helper: Try to extract a label
+    def extract_label(text):
+        text = clean_caption(text)
         for pattern in caption_patterns:
-            match = re.match(pattern, cleaned, re.IGNORECASE)
+            match = re.match(pattern, text, re.IGNORECASE)
             if match:
-                try:
-                    idx = int(match.group(1))
-                    desc = match.group(2).strip()
-                    desc = re.sub(r'[^\w\s\-.,!?()/:"]', '', desc).strip()
-                    caption = f"Image {idx}: {desc}" if desc else f"Image {idx}"
-                    caption_map[idx] = caption
-                    break
-                except:
-                    continue
+                idx = int(match.group(1))
+                desc = re.sub(r'[^\w\s\-.,!?()/:"]', '', match.group(2)).strip()
+                return f"Image {idx}: {desc}" if desc else f"Image {idx}"
+        return None
 
-    # --- STEP 5: Combine captions with image files ---
-    for idx, image_name in index_to_filename.items():
-        caption = caption_map.get(idx, f"Image {idx}")
-        image_map[caption] = image_name
+    # Step 1: Flatten all blocks (paragraphs, tables) in strict order
+    def iter_block_items(parent):
+        from docx.table import _Cell, Table
+        for child in parent.element.body:
+            if child.tag.endswith('}p'):
+                yield doc.paragraphs[parent.element.body.index(child)]
+            elif child.tag.endswith('}tbl'):
+                table = doc.tables[[t._element for t in doc.tables].index(child)]
+                yield table
 
-    # --- STEP 6: Output mapping file ---
+    blocks = list(iter_block_items(doc))
+
+    # Step 2: Walk in order, pairing labels and images
+    # Keep a rolling label (use previous label found for each image)
+    prev_label = None
+    for block in blocks:
+        if hasattr(block, 'paragraphs'):  # table
+            for row in block.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        label = extract_label(para.text)
+                        if label:
+                            prev_label = label
+        elif hasattr(block, 'text'):  # paragraph
+            label = extract_label(block.text)
+            if label:
+                prev_label = label
+            # Check if this paragraph has an image
+            for run in block.runs:
+                if 'graphic' in run._element.xml:
+                    # Find relId for this image
+                    for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
+                        for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
+                            rel_id = blip.get(qn('r:embed'))
+                            if rel_id:
+                                # Get image binary
+                                image_part = doc.part.related_parts[rel_id]
+                                image_name = f"image_{image_counter}.png"
+                                image_path = os.path.join(image_output_dir, image_name)
+                                with open(image_path, "wb") as f:
+                                    f.write(image_part.blob)
+                                # Use the most recent preceding label
+                                if prev_label:
+                                    image_map[prev_label] = image_name
+                                    prev_label = None
+                                else:
+                                    image_map[f"Image {image_counter}"] = image_name
+                                image_counter += 1
+
+    # Save map
     with open(mapping_output_path, "w") as f:
         json.dump(image_map, f, indent=2)
 
