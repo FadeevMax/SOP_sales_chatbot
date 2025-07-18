@@ -382,66 +382,51 @@ def download_gdoc_as_docx(doc_id, creds, out_path):
      f.write(request.execute())
    return True
 
-def maybe_show_referenced_images(answer_text, map, github_repo):
+def maybe_show_referenced_images(answer_text, img_map, github_repo):
     import re
     import streamlit as st
     import difflib
 
     img_mentions = re.findall(r"(Image\s*\d+)", answer_text, re.IGNORECASE)
-    img_mentions = [m.strip().lower() for m in img_mentions]
     shown = set()
+    map_keys = list(img_map.keys())
 
-    # 1. Try to match by "Image X" at start of key (full label match)
     for mention in img_mentions:
-        for caption in map:
-            if caption.lower().startswith(mention):
-                url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
-                if caption not in shown:
-                    st.image(url, caption=caption)
-                    shown.add(caption)
-                    break  # Only show once
+        mention_lc = mention.lower()
+        # 1. Try exact full label match
+        exact_matches = [k for k in map_keys if k.lower() == mention_lc]
+        if exact_matches:
+            caption = exact_matches[0]
+        else:
+            # 2. Try startswith (partial label match)
+            sw_matches = [k for k in map_keys if k.lower().startswith(mention_lc)]
+            if sw_matches:
+                caption = sw_matches[0]
+            else:
+                # 3. Fuzzy match
+                best = difflib.get_close_matches(mention_lc, [k.lower() for k in map_keys], n=1, cutoff=0.6)
+                if best:
+                    idx = [k.lower() for k in map_keys].index(best[0])
+                    caption = map_keys[idx]
+                else:
+                    # 4. n+1 fallback
+                    m = re.match(r'image\s*(\d+)', mention_lc)
+                    if m:
+                        img_num = int(m.group(1))
+                        img_file = f"image_{img_num+1}.png"
+                        url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_file}"
+                        if img_file not in shown:
+                            st.image(url, caption=f"Image {img_num} (auto n+1 fallback)")
+                            shown.add(img_file)
+                        continue
+                    else:
+                        continue  # No match at all
 
-    # 2. Fallback: if not shown, try n+1 logic
-    for mention in img_mentions:
-        m = re.match(r'image\s*(\d+)', mention)
-        if m:
-            img_num = int(m.group(1))
-            img_file = f"image_{img_num+1}.png"
-            url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_file}"
-            if img_file not in shown:
-                try:
-                    st.image(url, caption=f"Image {img_num} (auto n+1 fallback)")
-                    shown.add(img_file)
-                except Exception:
-                    pass  # If file doesn't exist, ignore
-
-    # 3. Fuzzy match to full labels if not already shown
-    for caption in map:
-        phrases = re.findall(r'(Image\s*\d+\:?[^\n\.]*)', answer_text, re.IGNORECASE)
-        best = difflib.get_close_matches(caption.lower(), [p.lower() for p in phrases], n=1, cutoff=0.7)
-        if best and caption not in shown:
-            url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
+        # Show only once per caption
+        if caption and caption not in shown:
+            url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_map[caption]}"
             st.image(url, caption=caption)
             shown.add(caption)
-
-    # 3. Fuzzy match: for any caption that is 'similar' to a sentence in the answer
-    for caption in map:
-        # Get the best-matching phrase in the answer for this caption
-        phrases = re.findall(r'(Image\s*\d+\:?[^\n\.]*)', answer_text, re.IGNORECASE)
-        best = difflib.get_close_matches(caption.lower(), [p.lower() for p in phrases], n=1, cutoff=0.5)
-        if best and caption not in shown:
-            url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
-            st.image(url, caption=caption)
-            shown.add(caption)
-
-    # 4. If nothing shown, fallback: high-similarity match (for robustness)
-    if not shown:
-        for caption in map:
-            sim = difflib.SequenceMatcher(None, caption.lower(), answer_text.lower()).ratio()
-            if sim > 0.5 and caption not in shown:
-                url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
-                st.image(url, caption=caption)
-                shown.add(caption)
 
 
 def get_gdoc_last_modified(creds, doc_name):
