@@ -388,34 +388,23 @@ def maybe_show_referenced_images(answer_text, img_map, github_repo):
 
     for mention in img_mentions:
         mention_lc = mention.lower()
-        # 1. Try exact full label match
+        # Try exact full label match
         exact_matches = [k for k in map_keys if k.lower() == mention_lc]
         if exact_matches:
             caption = exact_matches[0]
         else:
-            # 2. Try startswith (partial label match)
+            # Try startswith (partial label match)
             sw_matches = [k for k in map_keys if k.lower().startswith(mention_lc)]
             if sw_matches:
                 caption = sw_matches[0]
             else:
-                # 3. Fuzzy match
+                # Fuzzy match
                 best = difflib.get_close_matches(mention_lc, [k.lower() for k in map_keys], n=1, cutoff=0.6)
                 if best:
                     idx = [k.lower() for k in map_keys].index(best[0])
                     caption = map_keys[idx]
                 else:
-                    # 4. n+1 fallback
-                    m = re.match(r'image\s*(\d+)', mention_lc)
-                    if m:
-                        img_num = int(m.group(1))
-                        img_file = f"image_{img_num+1}.png"
-                        url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_file}"
-                        if img_file not in shown:
-                            st.image(url, caption=f"Image {img_num} (auto n+1 fallback)")
-                            shown.add(img_file)
-                        continue
-                    else:
-                        continue  # No match at all
+                    continue  # No match at all
 
         # Show only once per caption
         if caption and caption not in shown:
