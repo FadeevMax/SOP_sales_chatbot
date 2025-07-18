@@ -15,6 +15,7 @@ import requests
 import base64
 from docx import Document
 import re, os, json, unicodedata
+from difflib import SequenceMatcher, get_close_matches
 # --- Constants & Configuration ---
 DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
 You are the definitive source of truth, and your knowledge is based **exclusively** on the provided documents: "About GTI" and "GTI SOP by State". Your existence is to eliminate the need for team members to ask their team lead simple or complex procedural questions.
@@ -382,7 +383,24 @@ def maybe_show_referenced_images(answer_text):
                 github_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/images/{filename}"
                 st.image(github_url, caption=caption)
     except Exception as e:
-        st.warning(f"⚠️ Could not load referenced image: {e}")
+        st.warning(f"⚠️ Could not load referenced image: {e}")def maybe_show_referenced_images(answer_text):
+    map = load_map_from_github()
+    if not map:
+        return
+    matches = []
+    # First: try close matches
+    for caption in map:
+        if caption.lower() in answer_text.lower() or answer_text.lower() in caption.lower():
+            matches.append((caption, map[caption]))
+    if not matches:
+        # Fallback: fuzzy match
+        captions = list(map.keys())
+        close = get_close_matches(answer_text, captions, n=1, cutoff=0.4)
+        for c in close:
+            matches.append((c, map[c]))
+    # Display all matches found
+    for caption, filename in matches:
+        st.image(f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/images/{filename}", caption=caption)
 
 
 def get_gdoc_last_modified(creds, doc_name):
