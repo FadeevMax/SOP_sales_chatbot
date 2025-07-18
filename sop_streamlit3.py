@@ -95,19 +95,22 @@ import re
 import json
 
 def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
+    from docx.oxml.ns import qn
+
     if not os.path.exists(image_output_dir):
         os.makedirs(image_output_dir)
 
     doc = Document(docx_path)
     image_map = {}
     image_counter = 1
+
+    # Regex patterns for labels
     caption_patterns = [
         r"Image\s*(\d+)[\s\-–—:]*\s*(.*)",
         r"\bIMG\s*(\d+)[\s\-–—:]*\s*(.*)",
         r"\*?Image\s*(\d+)[\s\-–—:]*\s*(.*?)\*?",
     ]
 
-    # Helper: Clean caption text
     def clean_caption(text):
         cleaned = unicodedata.normalize('NFKC', text)
         cleaned = cleaned.replace("–", "-").replace("—", "-")
@@ -115,7 +118,6 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
         cleaned = cleaned.replace("‘", "'").replace("’", "'")
         return cleaned.strip()
 
-    # Helper: Try to extract a label
     def extract_label(text):
         text = clean_caption(text)
         for pattern in caption_patterns:
@@ -126,54 +128,74 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
                 return f"Image {idx}: {desc}" if desc else f"Image {idx}"
         return None
 
-    # Step 1: Flatten all blocks (paragraphs, tables) in strict order
-    def iter_block_items(parent):
-        from docx.table import _Cell, Table
-        for child in parent.element.body:
-            if child.tag.endswith('}p'):
-                yield doc.paragraphs[parent.element.body.index(child)]
-            elif child.tag.endswith('}tbl'):
-                table = doc.tables[[t._element for t in doc.tables].index(child)]
-                yield table
+    # ----------- TRAVERSE XML STRUCTURE IN ORDER -------------
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.text.paragraph import Paragraph
+    from docx.table import Table
 
-    blocks = list(iter_block_items(doc))
-
-    # Step 2: Walk in order, pairing labels and images
-    # Keep a rolling label (use previous label found for each image)
+    body = doc.element.body
     prev_label = None
-    for block in blocks:
-        if hasattr(block, 'paragraphs'):  # table
-            for row in block.rows:
-                for cell in row.cells:
-                    for para in cell.paragraphs:
-                        label = extract_label(para.text)
-                        if label:
-                            prev_label = label
-        elif hasattr(block, 'text'):  # paragraph
+
+    def walk_block_items(parent):
+        for child in parent.iterchildren():
+            if isinstance(child, CT_P):
+                yield Paragraph(child, doc)
+            elif isinstance(child, CT_Tbl):
+                yield Table(child, doc)
+
+    for block in walk_block_items(body):
+        # If it's a paragraph
+        if isinstance(block, Paragraph):
             label = extract_label(block.text)
             if label:
                 prev_label = label
-            # Check if this paragraph has an image
+
+            # Check for images in the paragraph
             for run in block.runs:
                 if 'graphic' in run._element.xml:
-                    # Find relId for this image
                     for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
                         for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
                             rel_id = blip.get(qn('r:embed'))
                             if rel_id:
-                                # Get image binary
                                 image_part = doc.part.related_parts[rel_id]
                                 image_name = f"image_{image_counter}.png"
                                 image_path = os.path.join(image_output_dir, image_name)
                                 with open(image_path, "wb") as f:
                                     f.write(image_part.blob)
-                                # Use the most recent preceding label
+                                # Use most recent preceding label, else fallback
                                 if prev_label:
                                     image_map[prev_label] = image_name
                                     prev_label = None
                                 else:
                                     image_map[f"Image {image_counter}"] = image_name
                                 image_counter += 1
+
+        # If it's a table
+        elif isinstance(block, Table):
+            for row in block.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        label = extract_label(para.text)
+                        if label:
+                            prev_label = label
+                        for run in para.runs:
+                            if 'graphic' in run._element.xml:
+                                for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
+                                    for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
+                                        rel_id = blip.get(qn('r:embed'))
+                                        if rel_id:
+                                            image_part = doc.part.related_parts[rel_id]
+                                            image_name = f"image_{image_counter}.png"
+                                            image_path = os.path.join(image_output_dir, image_name)
+                                            with open(image_path, "wb") as f:
+                                                f.write(image_part.blob)
+                                            if prev_label:
+                                                image_map[prev_label] = image_name
+                                                prev_label = None
+                                            else:
+                                                image_map[f"Image {image_counter}"] = image_name
+                                            image_counter += 1
 
     # Save map
     with open(mapping_output_path, "w") as f:
