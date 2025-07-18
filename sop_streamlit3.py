@@ -210,34 +210,34 @@ def sync_gdoc_to_github(force=False):
     # Download latest Google Doc as PDF and DOCX
     pdf_success = download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH)
     docx_success = download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
-      
+   
     if not (pdf_success and docx_success):
-       st.error("Failed to download Google Doc as PDF or DOCX.")
-       return False
-
-    # Extract labeled images from DOCX
+        st.error("Failed to download Google Doc as PDF or DOCX.")
+        return False
+   
+    # 2. Extract images and update map.json **AFTER** new DOCX is written
     extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH, debug=True)
-    
-    # Update map.json on GitHub
-    success = update_json_on_github(
+   
+    # 3. Upload map.json to GitHub
+    map_success = update_json_on_github(
         IMAGE_MAP_PATH,
         "map.json",
         "Update map.json from SOP DOCX"
     )
-    if not success:
-       st.error("❌ Failed to update map.json on GitHub!")
-       
-    # Upload images to GitHub
+    if not map_success:
+        st.error("❌ Failed to update map.json on GitHub!")
+   
+    # 4. Upload all images to GitHub
     for file in os.listdir(IMAGE_DIR):
-       local_path = os.path.join(IMAGE_DIR, file)
-       github_path = f"images/{file}"
-       upload_file_to_github(
-          local_path,
-          github_path,
-          f"Update {file} from SOP DOCX"
-          )
-          
-    # Upload PDF and DOCX to GitHub
+        local_path = os.path.join(IMAGE_DIR, file)
+        github_path = f"images/{file}"
+        upload_file_to_github(
+            local_path,
+            github_path,
+            f"Update {file} from SOP DOCX"
+        )
+   
+    # 5. Upload PDF and DOCX to GitHub
     pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
     docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
    
