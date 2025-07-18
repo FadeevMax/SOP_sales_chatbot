@@ -331,12 +331,12 @@ def update_docx_on_github(local_docx_path):
     return resp.status_code in [200, 201]
 
 def download_gdoc_as_docx(doc_id, creds, out_path):
-   drive_service = build('drive', 'v3', credentials=creds)
-   request = drive_service.files().export_media(fileId=doc_id, mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-   os.makedirs(os.path.dirname(out_path), exist_ok=True)
-   with open(out_path, "wb") as f:
-     f.write(request.execute())
-   return True
+    drive_service = build('drive', 'v3', credentials=creds)
+    request = drive_service.files().export_media(fileId=doc_id, mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(request.execute())
+    return True
 
 def maybe_show_referenced_images(answer_text):
     try:
@@ -353,7 +353,6 @@ def maybe_show_referenced_images(answer_text):
                 st.image(github_url, caption=caption)
     except Exception as e:
         st.warning(f"⚠️ Could not load referenced image: {e}")
-
 
 def get_gdoc_last_modified(creds, doc_name):
     drive_service = build('drive', 'v3', credentials=creds)
