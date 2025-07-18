@@ -95,80 +95,98 @@ import re
 import json
 
 def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
-    from docx import Document
-    import re
-    import unicodedata
-
+    from docx.oxml.ns import qn
     if not os.path.exists(image_output_dir):
         os.makedirs(image_output_dir)
 
     doc = Document(docx_path)
     image_map = {}
-    rel_id_to_index = {}
-    index_to_filename = {}
-    idx_counter = 1
+    image_counter = 1
 
-    # Map inline shapes to index
-    for shape in doc.inline_shapes:
-        try:
-            rId = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
-            rel_id_to_index[rId] = idx_counter
-            idx_counter += 1
-        except Exception:
-            continue
+    # Robust pattern: matches "Image 3", "Image 3:", "Image 3 - Description", etc.
+    caption_pattern = re.compile(r"Image\s*(\d+)[\s\-–—:]*\s*(.*)", re.IGNORECASE)
 
-    # Save images to disk
-    for rel in doc.part._rels.values():
-        if "image" in rel.target_ref:
-            rel_id = rel.rId
-            idx = rel_id_to_index.get(rel_id)
-            if idx:
-                image_data = rel.target_part.blob
-                image_name = f"image_{idx}.png"
-                image_path = os.path.join(image_output_dir, image_name)
-                with open(image_path, "wb") as f:
-                    f.write(image_data)
-                index_to_filename[idx] = image_name
+    def clean_caption(text):
+        cleaned = unicodedata.normalize('NFKC', text)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        cleaned = cleaned.replace("–", "-").replace("—", "-").replace("“", '"').replace("”", '"')
+        cleaned = cleaned.replace("‘", "'").replace("’", "'")
+        return cleaned
 
-    # Scan paragraphs for captions - improved regex pattern
-    caption_map = {}
-    for para in doc.paragraphs:
-        text = para.text.strip()
-        if not text:
-            continue
+    def extract_label(text):
+        text = clean_caption(text)
+        m = caption_pattern.match(text)
+        if m:
+            idx = int(m.group(1))
+            desc = m.group(2).strip().rstrip(".")
+            # Standardize to: Image X: Description (always with colon)
+            return f"Image {idx}: {desc}" if desc else f"Image {idx}"
+        return None
 
-        # Clean up the text first
-        cleaned = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.text.paragraph import Paragraph
+    from docx.table import Table
 
-        # Try multiple patterns to match captions
-        patterns = [
-            r"Image\s*(\d+)\s*[.:]?\s*(.*)",  # Original pattern
-            r"\*Image\s*(\d+)\s*[.:]?\s*(.*?)\*",  # Pattern for *Image X. caption*
-            r"Image\s*(\d+)\s*[.:]?\s*(.+?)(?:\*|$)",  # Pattern that stops at * or end
-        ]
+    body = doc.element.body
+    prev_label = None
 
-        for pattern in patterns:
-            match = re.search(pattern, cleaned, re.IGNORECASE)
-            if match:
-                idx = int(match.group(1))
-                desc = match.group(2).strip()
+    def walk_block_items(parent):
+        for child in parent.iterchildren():
+            if isinstance(child, CT_P):
+                yield Paragraph(child, doc)
+            elif isinstance(child, CT_Tbl):
+                yield Table(child, doc)
 
-                # Clean up description
-                desc = re.sub(r'[^\w\s\-.,!?()/:"]', '', desc)  # Remove weird characters
-                desc = desc.strip()
+    for block in walk_block_items(body):
+        if isinstance(block, Paragraph):
+            label = extract_label(block.text)
+            if label:
+                prev_label = label
 
-                if desc:
-                    caption = f"Image {idx}: {desc}"
-                else:
-                    caption = f"Image {idx}"
+            # Check for images in the paragraph
+            for run in block.runs:
+                if 'graphic' in run._element.xml:
+                    for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
+                        for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
+                            rel_id = blip.get(qn('r:embed'))
+                            if rel_id:
+                                image_part = doc.part.related_parts[rel_id]
+                                image_name = f"image_{image_counter}.png"
+                                image_path = os.path.join(image_output_dir, image_name)
+                                with open(image_path, "wb") as f:
+                                    f.write(image_part.blob)
+                                if prev_label:
+                                    image_map[prev_label] = image_name
+                                    prev_label = None
+                                else:
+                                    image_map[f"Image {image_counter}"] = image_name
+                                image_counter += 1
 
-                caption_map[idx] = caption
-                break
-
-    # Combine data
-    for idx, image_name in index_to_filename.items():
-        caption = caption_map.get(idx, f"Image {idx}")
-        image_map[caption] = image_name
+        elif isinstance(block, Table):
+            for row in block.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        label = extract_label(para.text)
+                        if label:
+                            prev_label = label
+                        for run in para.runs:
+                            if 'graphic' in run._element.xml:
+                                for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
+                                    for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
+                                        rel_id = blip.get(qn('r:embed'))
+                                        if rel_id:
+                                            image_part = doc.part.related_parts[rel_id]
+                                            image_name = f"image_{image_counter}.png"
+                                            image_path = os.path.join(image_output_dir, image_name)
+                                            with open(image_path, "wb") as f:
+                                                f.write(image_part.blob)
+                                            if prev_label:
+                                                image_map[prev_label] = image_name
+                                                prev_label = None
+                                            else:
+                                                image_map[f"Image {image_counter}"] = image_name
+                                            image_counter += 1
 
     with open(mapping_output_path, "w") as f:
         json.dump(image_map, f, indent=2)
@@ -254,30 +272,54 @@ def sync_gdoc_to_github(force=False):
         st.error("Failed to update both PDF and DOCX on GitHub.")
         return False
 
-def update_json_on_github(local_json_path, repo_json_path, commit_message):
-    import base64, requests, os
-    GITHUB_REPO = "FadeevMax/SOP_sales_chatbot"
-    GITHUB_TOKEN = st.secrets["GitHub_API"]
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{repo_json_path}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    # Get SHA for overwrite
+def update_json_on_github(local_json_path, repo_json_path, commit_message, github_repo, github_token):
+    """
+    Uploads (or updates) the map.json file to a GitHub repo via the GitHub API.
+
+    Args:
+        local_json_path (str): Path to your local map.json file.
+        repo_json_path (str): Path in the repo (e.g. "map.json" or "images/map.json").
+        commit_message (str): Commit message for the update.
+        github_repo (str): Full repo, e.g. "FadeevMax/SOP_sales_chatbot"
+        github_token (str): Personal access token with repo write access.
+
+    Returns:
+        bool: True if upload succeeded, False otherwise.
+    """
+    url = f"https://api.github.com/repos/{github_repo}/contents/{repo_json_path}"
+    headers = {"Authorization": f"token {github_token}"}
+
+    # Get current file SHA (needed for overwrite)
     r = requests.get(url, headers=headers)
     sha = r.json().get("sha") if r.status_code == 200 else None
-    # Encode file
+
+    # Read and encode the file
     with open(local_json_path, "rb") as f:
         content = base64.b64encode(f.read()).decode()
+
     data = {
         "message": commit_message,
         "content": content,
-        "sha": sha
     }
+    if sha:
+        data["sha"] = sha
+
     resp = requests.put(url, headers=headers, json=data)
     if resp.status_code in [200, 201]:
-        print("✅ image_map.json updated successfully!")
+        print("✅ map.json updated successfully on GitHub!")
         return True
     else:
-        print(f"❌ Failed to update image_map.json: {resp.text}")
+        print(f"❌ Failed to update map.json: {resp.text}")
         return False
+
+# Example usage:
+# update_json_on_github(
+#     local_json_path="cache/images/map.json",
+#     repo_json_path="map.json",
+#     commit_message="Update map.json from SOP DOCX",
+#     github_repo="FadeevMax/SOP_sales_chatbot",
+#     github_token="YOUR_GITHUB_TOKEN"
+# )
 
 def load_map_from_github():
     """
@@ -338,21 +380,39 @@ def download_gdoc_as_docx(doc_id, creds, out_path):
      f.write(request.execute())
    return True
 
-def maybe_show_referenced_images(answer_text):
-    try:
-        map = load_map_from_github()
-        if not map:
-            return
+def maybe_show_referenced_images(answer_text, map, github_repo):
+    # 1. Find all "Image X" references in answer text
+    img_mentions = re.findall(r"(Image\s*\d+)", answer_text, re.IGNORECASE)
+    img_mentions = [m.strip().lower() for m in img_mentions]
+    shown = set()
 
-        for caption, filename in map.items():
-            # Match using similarity or substring (you can tweak the matching as needed)
-            similarity = difflib.SequenceMatcher(None, caption.lower(), answer_text.lower()).ratio()
-            if similarity > 0.6 or caption.lower() in answer_text.lower():
-                # Build the GitHub raw image URL
-                github_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/images/{filename}"
-                st.image(github_url, caption=caption)
-    except Exception as e:
-        st.warning(f"⚠️ Could not load referenced image: {e}")
+    # 2. Try to match by "Image X" at start of key
+    for mention in img_mentions:
+        for caption in map:
+            if caption.lower().startswith(mention):
+                url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
+                if caption not in shown:
+                    st.image(url, caption=caption)
+                    shown.add(caption)
+
+    # 3. Fuzzy match: for any caption that is 'similar' to a sentence in the answer
+    for caption in map:
+        # Get the best-matching phrase in the answer for this caption
+        phrases = re.findall(r'(Image\s*\d+\:?[^\n\.]*)', answer_text, re.IGNORECASE)
+        best = difflib.get_close_matches(caption.lower(), [p.lower() for p in phrases], n=1, cutoff=0.5)
+        if best and caption not in shown:
+            url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
+            st.image(url, caption=caption)
+            shown.add(caption)
+
+    # 4. If nothing shown, fallback: high-similarity match (for robustness)
+    if not shown:
+        for caption in map:
+            sim = difflib.SequenceMatcher(None, caption.lower(), answer_text.lower()).ratio()
+            if sim > 0.5 and caption not in shown:
+                url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
+                st.image(url, caption=caption)
+                shown.add(caption)
 
 
 def get_gdoc_last_modified(creds, doc_name):
