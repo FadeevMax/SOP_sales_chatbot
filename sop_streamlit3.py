@@ -13,9 +13,6 @@ from googleapiclient.discovery import build
 import io # Needed for handling the in-memory file download
 import requests
 import base64
-from docx import Document
-import re, os, json, unicodedata
-from difflib import SequenceMatcher, get_close_matches
 # --- Constants & Configuration ---
 DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
 You are the definitive source of truth, and your knowledge is based **exclusively** on the provided documents: "About GTI" and "GTI SOP by State". Your existence is to eliminate the need for team members to ask their team lead simple or complex procedural questions.
@@ -98,109 +95,81 @@ import re
 import json
 
 def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
-    from docx.oxml.ns import qn
+    from docx import Document
+    import re
+    import unicodedata
 
     if not os.path.exists(image_output_dir):
         os.makedirs(image_output_dir)
 
     doc = Document(docx_path)
     image_map = {}
-    image_counter = 1
+    rel_id_to_index = {}
+    index_to_filename = {}
+    idx_counter = 1
 
-    # Regex patterns for labels
-    caption_patterns = [
-        r"Image\s*(\d+)[\s\-–—:]*\s*(.*)",
-        r"\bIMG\s*(\d+)[\s\-–—:]*\s*(.*)",
-        r"\*?Image\s*(\d+)[\s\-–—:]*\s*(.*?)\*?",
-    ]
+    # Map inline shapes to index
+    for shape in doc.inline_shapes:
+        try:
+            rId = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
+            rel_id_to_index[rId] = idx_counter
+            idx_counter += 1
+        except Exception:
+            continue
 
-    def clean_caption(text):
-        cleaned = unicodedata.normalize('NFKC', text)
-        cleaned = cleaned.replace("–", "-").replace("—", "-")
-        cleaned = cleaned.replace("“", '"').replace("”", '"')
-        cleaned = cleaned.replace("‘", "'").replace("’", "'")
-        return cleaned.strip()
+    # Save images to disk
+    for rel in doc.part._rels.values():
+        if "image" in rel.target_ref:
+            rel_id = rel.rId
+            idx = rel_id_to_index.get(rel_id)
+            if idx:
+                image_data = rel.target_part.blob
+                image_name = f"image_{idx}.png"
+                image_path = os.path.join(image_output_dir, image_name)
+                with open(image_path, "wb") as f:
+                    f.write(image_data)
+                index_to_filename[idx] = image_name
 
-    def extract_label(text):
-        text = clean_caption(text)
-        for pattern in caption_patterns:
-            match = re.match(pattern, text, re.IGNORECASE)
+    # Scan paragraphs for captions - improved regex pattern
+    caption_map = {}
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
+            
+        # Clean up the text first
+        cleaned = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+        
+        # Try multiple patterns to match captions
+        patterns = [
+            r"Image\s*(\d+)\s*[.:]?\s*(.*)",  # Original pattern
+            r"\*Image\s*(\d+)\s*[.:]?\s*(.*?)\*",  # Pattern for *Image X. caption*
+            r"Image\s*(\d+)\s*[.:]?\s*(.+?)(?:\*|$)",  # Pattern that stops at * or end
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, cleaned, re.IGNORECASE)
             if match:
                 idx = int(match.group(1))
-                desc = re.sub(r'[^\w\s\-.,!?()/:"]', '', match.group(2)).strip()
-                return f"Image {idx}: {desc}" if desc else f"Image {idx}"
-        return None
+                desc = match.group(2).strip()
+                
+                # Clean up description
+                desc = re.sub(r'[^\w\s\-.,!?()/:"]', '', desc)  # Remove weird characters
+                desc = desc.strip()
+                
+                if desc:
+                    caption = f"Image {idx}: {desc}"
+                else:
+                    caption = f"Image {idx}"
+                
+                caption_map[idx] = caption
+                break
 
-    # ----------- TRAVERSE XML STRUCTURE IN ORDER -------------
-    from docx.oxml.table import CT_Tbl
-    from docx.oxml.text.paragraph import CT_P
-    from docx.text.paragraph import Paragraph
-    from docx.table import Table
+    # Combine data
+    for idx, image_name in index_to_filename.items():
+        caption = caption_map.get(idx, f"Image {idx}")
+        image_map[caption] = image_name
 
-    body = doc.element.body
-    prev_label = None
-
-    def walk_block_items(parent):
-        for child in parent.iterchildren():
-            if isinstance(child, CT_P):
-                yield Paragraph(child, doc)
-            elif isinstance(child, CT_Tbl):
-                yield Table(child, doc)
-
-    for block in walk_block_items(body):
-        # If it's a paragraph
-        if isinstance(block, Paragraph):
-            label = extract_label(block.text)
-            if label:
-                prev_label = label
-
-            # Check for images in the paragraph
-            for run in block.runs:
-                if 'graphic' in run._element.xml:
-                    for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
-                        for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
-                            rel_id = blip.get(qn('r:embed'))
-                            if rel_id:
-                                image_part = doc.part.related_parts[rel_id]
-                                image_name = f"image_{image_counter}.png"
-                                image_path = os.path.join(image_output_dir, image_name)
-                                with open(image_path, "wb") as f:
-                                    f.write(image_part.blob)
-                                # Use most recent preceding label, else fallback
-                                if prev_label:
-                                    image_map[prev_label] = image_name
-                                    prev_label = None
-                                else:
-                                    image_map[f"Image {image_counter}"] = image_name
-                                image_counter += 1
-
-        # If it's a table
-        elif isinstance(block, Table):
-            for row in block.rows:
-                for cell in row.cells:
-                    for para in cell.paragraphs:
-                        label = extract_label(para.text)
-                        if label:
-                            prev_label = label
-                        for run in para.runs:
-                            if 'graphic' in run._element.xml:
-                                for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
-                                    for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
-                                        rel_id = blip.get(qn('r:embed'))
-                                        if rel_id:
-                                            image_part = doc.part.related_parts[rel_id]
-                                            image_name = f"image_{image_counter}.png"
-                                            image_path = os.path.join(image_output_dir, image_name)
-                                            with open(image_path, "wb") as f:
-                                                f.write(image_part.blob)
-                                            if prev_label:
-                                                image_map[prev_label] = image_name
-                                                prev_label = None
-                                            else:
-                                                image_map[f"Image {image_counter}"] = image_name
-                                            image_counter += 1
-
-    # Save map
     with open(mapping_output_path, "w") as f:
         json.dump(image_map, f, indent=2)
 
@@ -240,34 +209,34 @@ def sync_gdoc_to_github(force=False):
     # Download latest Google Doc as PDF and DOCX
     pdf_success = download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH)
     docx_success = download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
-   
+      
     if not (pdf_success and docx_success):
-        st.error("Failed to download Google Doc as PDF or DOCX.")
-        return False
-   
-    # 2. Extract images and update map.json **AFTER** new DOCX is written
+       st.error("Failed to download Google Doc as PDF or DOCX.")
+       return False
+
+    # Extract labeled images from DOCX
     extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH, debug=True)
-   
-    # 3. Upload map.json to GitHub
-    map_success = update_json_on_github(
+    
+    # Update map.json on GitHub
+    success = update_json_on_github(
         IMAGE_MAP_PATH,
         "map.json",
         "Update map.json from SOP DOCX"
     )
-    if not map_success:
-        st.error("❌ Failed to update map.json on GitHub!")
-   
-    # 4. Upload all images to GitHub
+    if not success:
+       st.error("❌ Failed to update map.json on GitHub!")
+       
+    # Upload images to GitHub
     for file in os.listdir(IMAGE_DIR):
-        local_path = os.path.join(IMAGE_DIR, file)
-        github_path = f"images/{file}"
-        upload_file_to_github(
-            local_path,
-            github_path,
-            f"Update {file} from SOP DOCX"
-        )
-   
-    # 5. Upload PDF and DOCX to GitHub
+       local_path = os.path.join(IMAGE_DIR, file)
+       github_path = f"images/{file}"
+       upload_file_to_github(
+          local_path,
+          github_path,
+          f"Update {file} from SOP DOCX"
+          )
+          
+    # Upload PDF and DOCX to GitHub
     pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
     docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
    
@@ -384,25 +353,6 @@ def maybe_show_referenced_images(answer_text):
                 st.image(github_url, caption=caption)
     except Exception as e:
         st.warning(f"⚠️ Could not load referenced image: {e}")
-       
-def maybe_show_referenced_images(answer_text):
-    map = load_map_from_github()
-    if not map:
-        return
-    matches = []
-    # First: try close matches
-    for caption in map:
-        if caption.lower() in answer_text.lower() or answer_text.lower() in caption.lower():
-            matches.append((caption, map[caption]))
-    if not matches:
-        # Fallback: fuzzy match
-        captions = list(map.keys())
-        close = get_close_matches(answer_text, captions, n=1, cutoff=0.4)
-        for c in close:
-            matches.append((c, map[c]))
-    # Display all matches found
-    for caption, filename in matches:
-        st.image(f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/images/{filename}", caption=caption)
 
 
 def get_gdoc_last_modified(creds, doc_name):
