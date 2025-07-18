@@ -95,10 +95,6 @@ import re
 import json
 
 def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
-    from docx import Document
-    import re
-    import unicodedata
-
     if not os.path.exists(image_output_dir):
         os.makedirs(image_output_dir)
 
@@ -108,7 +104,7 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
     index_to_filename = {}
     idx_counter = 1
 
-    # Map inline shapes to index
+    # --- STEP 1: Map images by relId to index ---
     for shape in doc.inline_shapes:
         try:
             rId = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
@@ -117,7 +113,7 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
         except Exception:
             continue
 
-    # Save images to disk
+    # --- STEP 2: Save images to disk ---
     for rel in doc.part._rels.values():
         if "image" in rel.target_ref:
             rel_id = rel.rId
@@ -130,46 +126,51 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
                     f.write(image_data)
                 index_to_filename[idx] = image_name
 
-    # Scan paragraphs for captions - improved regex pattern
+    # --- STEP 3: Gather all paragraphs including from tables ---
+    paragraphs = list(doc.paragraphs)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                paragraphs.extend(cell.paragraphs)
+
+    # --- STEP 4: Match captions ---
     caption_map = {}
-    for para in doc.paragraphs:
+    caption_patterns = [
+        r"Image\s*(\d+)[\s\-–—:]*\s*(.*)",
+        r"\bIMG\s*(\d+)[\s\-–—:]*\s*(.*)",
+        r"\*?Image\s*(\d+)[\s\-–—:]*\s*(.*?)\*?",
+    ]
+
+    for para in paragraphs:
         text = para.text.strip()
         if not text:
             continue
-            
-        # Clean up the text first
-        cleaned = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
-        
-        # Try multiple patterns to match captions
-        patterns = [
-            r"Image\s*(\d+)\s*[.:]?\s*(.*)",  # Original pattern
-            r"\*Image\s*(\d+)\s*[.:]?\s*(.*?)\*",  # Pattern for *Image X. caption*
-            r"Image\s*(\d+)\s*[.:]?\s*(.+?)(?:\*|$)",  # Pattern that stops at * or end
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, cleaned, re.IGNORECASE)
-            if match:
-                idx = int(match.group(1))
-                desc = match.group(2).strip()
-                
-                # Clean up description
-                desc = re.sub(r'[^\w\s\-.,!?()/:"]', '', desc)  # Remove weird characters
-                desc = desc.strip()
-                
-                if desc:
-                    caption = f"Image {idx}: {desc}"
-                else:
-                    caption = f"Image {idx}"
-                
-                caption_map[idx] = caption
-                break
 
-    # Combine data
+        # Normalize text
+        cleaned = unicodedata.normalize('NFKC', text)
+        cleaned = cleaned.replace("–", "-").replace("—", "-")
+        cleaned = cleaned.replace("“", '"').replace("”", '"')
+        cleaned = cleaned.replace("‘", "'").replace("’", "'")
+
+        for pattern in caption_patterns:
+            match = re.match(pattern, cleaned, re.IGNORECASE)
+            if match:
+                try:
+                    idx = int(match.group(1))
+                    desc = match.group(2).strip()
+                    desc = re.sub(r'[^\w\s\-.,!?()/:"]', '', desc).strip()
+                    caption = f"Image {idx}: {desc}" if desc else f"Image {idx}"
+                    caption_map[idx] = caption
+                    break
+                except:
+                    continue
+
+    # --- STEP 5: Combine captions with image files ---
     for idx, image_name in index_to_filename.items():
         caption = caption_map.get(idx, f"Image {idx}")
         image_map[caption] = image_name
 
+    # --- STEP 6: Output mapping file ---
     with open(mapping_output_path, "w") as f:
         json.dump(image_map, f, indent=2)
 
