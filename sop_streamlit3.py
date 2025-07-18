@@ -383,7 +383,9 @@ def maybe_show_referenced_images(answer_text):
                 github_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/images/{filename}"
                 st.image(github_url, caption=caption)
     except Exception as e:
-        st.warning(f"⚠️ Could not load referenced image: {e}")def maybe_show_referenced_images(answer_text):
+        st.warning(f"⚠️ Could not load referenced image: {e}")
+       
+ def maybe_show_referenced_images(answer_text):
     map = load_map_from_github()
     if not map:
         return
