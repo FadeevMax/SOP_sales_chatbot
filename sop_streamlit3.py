@@ -237,10 +237,12 @@ def sync_gdoc_to_github(force=False):
 
     # Update map.json on GitHub
     success = update_json_on_github(
-        IMAGE_MAP_PATH,
-        "map.json",
-        "Update map.json from SOP DOCX"
-    )
+       IMAGE_MAP_PATH,
+       "map.json",
+       "Update map.json from SOP DOCX",
+       GITHUB_REPO,
+       GITHUB_TOKEN
+   )
     if not success:
        st.error("❌ Failed to update map.json on GitHub!")
 
