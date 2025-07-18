@@ -384,19 +384,28 @@ def download_gdoc_as_docx(doc_id, creds, out_path):
    return True
 
 def maybe_show_referenced_images(answer_text, map, github_repo):
-    # 1. Find all "Image X" references in answer text
+    import re
+    import streamlit as st
+
     img_mentions = re.findall(r"(Image\s*\d+)", answer_text, re.IGNORECASE)
     img_mentions = [m.strip().lower() for m in img_mentions]
     shown = set()
 
-    # 2. Try to match by "Image X" at start of key
+    # 1. Try to match by "Image X" at start of key
     for mention in img_mentions:
-        for caption in map:
-            if caption.lower().startswith(mention):
-                url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
-                if caption not in shown:
-                    st.image(url, caption=caption)
-                    shown.add(caption)
+        # Try n+1 logic if mention is just "image n"
+        m = re.match(r'image\s*(\d+)', mention)
+        if m:
+            img_num = int(m.group(1))
+            img_file = f"image_{img_num + 1}.png"
+            # If that file exists in your image dir, show it directly
+            url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_file}"
+            try:
+                # Try showing, if it works, show and mark as shown
+                st.image(url, caption=f"Image {img_num}: (auto n+1)")
+                shown.add(img_file)
+            except Exception:
+                pass  # ignore if file doesn't exist
 
     # 3. Fuzzy match: for any caption that is 'similar' to a sentence in the answer
     for caption in map:
