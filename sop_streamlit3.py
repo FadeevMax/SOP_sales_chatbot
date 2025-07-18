@@ -136,32 +136,32 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
         text = para.text.strip()
         if not text:
             continue
-            
+
         # Clean up the text first
         cleaned = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
-        
+
         # Try multiple patterns to match captions
         patterns = [
             r"Image\s*(\d+)\s*[.:]?\s*(.*)",  # Original pattern
             r"\*Image\s*(\d+)\s*[.:]?\s*(.*?)\*",  # Pattern for *Image X. caption*
             r"Image\s*(\d+)\s*[.:]?\s*(.+?)(?:\*|$)",  # Pattern that stops at * or end
         ]
-        
+
         for pattern in patterns:
             match = re.search(pattern, cleaned, re.IGNORECASE)
             if match:
                 idx = int(match.group(1))
                 desc = match.group(2).strip()
-                
+
                 # Clean up description
                 desc = re.sub(r'[^\w\s\-.,!?()/:"]', '', desc)  # Remove weird characters
                 desc = desc.strip()
-                
+
                 if desc:
                     caption = f"Image {idx}: {desc}"
                 else:
                     caption = f"Image {idx}"
-                
+
                 caption_map[idx] = caption
                 break
 
@@ -209,14 +209,14 @@ def sync_gdoc_to_github(force=False):
     # Download latest Google Doc as PDF and DOCX
     pdf_success = download_gdoc_as_pdf(doc_id, creds, PDF_CACHE_PATH)
     docx_success = download_gdoc_as_docx(doc_id, creds, DOCX_LOCAL_PATH)
-      
+
     if not (pdf_success and docx_success):
        st.error("Failed to download Google Doc as PDF or DOCX.")
        return False
 
     # Extract labeled images from DOCX
     extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH, debug=True)
-    
+
     # Update map.json on GitHub
     success = update_json_on_github(
         IMAGE_MAP_PATH,
@@ -225,7 +225,7 @@ def sync_gdoc_to_github(force=False):
     )
     if not success:
        st.error("❌ Failed to update map.json on GitHub!")
-       
+
     # Upload images to GitHub
     for file in os.listdir(IMAGE_DIR):
        local_path = os.path.join(IMAGE_DIR, file)
@@ -235,11 +235,11 @@ def sync_gdoc_to_github(force=False):
           github_path,
           f"Update {file} from SOP DOCX"
           )
-          
+
     # Upload PDF and DOCX to GitHub
     pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
     docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
-   
+
     if pdf_uploaded and docx_uploaded:
         st.success("PDF and DOCX updated on GitHub with the latest from Google Doc!")
         set_last_gdoc_synced_time(modified_time)
@@ -311,7 +311,7 @@ def upload_file_to_github(local_path, github_path, commit_message):
     }
     resp = requests.put(url, headers=headers, json=data)
     return resp.status_code in [200, 201]
-   
+
 def update_docx_on_github(local_docx_path):
     docx_name = "Live_GTI_SOP.docx"
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{docx_name}"
@@ -331,12 +331,12 @@ def update_docx_on_github(local_docx_path):
     return resp.status_code in [200, 201]
 
 def download_gdoc_as_docx(doc_id, creds, out_path):
-    drive_service = build('drive', 'v3', credentials=creds)
-    request = drive_service.files().export_media(fileId=doc_id, mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "wb") as f:
-        f.write(request.execute())
-    return True
+   drive_service = build('drive', 'v3', credentials=creds)
+   request = drive_service.files().export_media(fileId=doc_id, mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+   os.makedirs(os.path.dirname(out_path), exist_ok=True)
+   with open(out_path, "wb") as f:
+     f.write(request.execute())
+   return True
 
 def maybe_show_referenced_images(answer_text):
     try:
@@ -353,6 +353,7 @@ def maybe_show_referenced_images(answer_text):
                 st.image(github_url, caption=caption)
     except Exception as e:
         st.warning(f"⚠️ Could not load referenced image: {e}")
+
 
 def get_gdoc_last_modified(creds, doc_name):
     drive_service = build('drive', 'v3', credentials=creds)
@@ -402,7 +403,7 @@ def update_pdf_on_github(local_pdf_path):
     }
     resp = requests.put(url, headers=headers, json=data)
     return resp.status_code in [200, 201]
-      
+
 
 
 # --- Functions for User and State Management (No changes here) ---
@@ -455,11 +456,11 @@ def get_live_sop_pdf_path(doc_name: str) -> str:
     """
     try:
         st.info("Checking for SOP updates from Google Docs...")
-        
+
         # Create cache directory if it doesn't exist
         if not os.path.exists(CACHE_DIR):
             os.makedirs(CACHE_DIR)
-            
+
         scopes = ['https://www.googleapis.com/auth/drive.readonly']
         creds_dict = st.secrets["gcp_service_account"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
@@ -472,23 +473,23 @@ def get_live_sop_pdf_path(doc_name: str) -> str:
         if not files:
             st.error(f"No Google Doc found with the name: '{doc_name}'.")
             return None
-        
+
         doc_id = files[0]['id']
-        
+
         # Export the document as PDF
         request = drive_service.files().export_media(fileId=doc_id, mimeType='application/pdf')
-        
+
         # Download the file content into an in-memory buffer
         fh = io.BytesIO()
         downloader = io.BytesIO(request.execute())
-        
+
         # Define the path for the cached file
         cached_file_path = os.path.join(CACHE_DIR, "cached_sop.pdf")
-        
+
         # Write the downloaded content to the cached file
         with open(cached_file_path, "wb") as f:
             f.write(downloader.getbuffer())
-            
+
         st.success(f"✅ SOP updated successfully from Google Docs!")
         return cached_file_path
 
@@ -653,7 +654,7 @@ def run_main_app():
            instruction_names = list(st.session_state.custom_instructions.keys())
            old_instruction = st.session_state.current_instruction_name
            new_instruction = st.selectbox("Choose instructions:", instruction_names, index=instruction_names.index(old_instruction))
-   
+
        settings_changed = (old_model != new_model) or (old_instruction != new_instruction)
        if settings_changed:
            st.warning("⚠️ Settings changed. You need to start a new thread to apply these changes.")
@@ -674,7 +675,7 @@ def run_main_app():
            st.session_state.model = new_model
            st.session_state.current_instruction_name = new_instruction
            st.session_state.instructions = st.session_state.custom_instructions[new_instruction]
-   
+
        if not st.session_state.get('assistant_setup_complete', False):
            try:
                if PDF_CACHE_PATH and os.path.exists(PDF_CACHE_PATH):
@@ -682,17 +683,17 @@ def run_main_app():
                else:
                    st.error("Could not retrieve the SOP PDF. Assistant setup failed.")
                    st.stop()
-   
+
                with st.spinner("Setting up AI assistant with the latest data..."):
                    client = OpenAI(api_key=st.session_state.api_key)
                    file_response = client.files.create(file=open(st.session_state.file_path, "rb"), purpose="assistants")
                    file_id = file_response.id
-   
+
                    vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
                    client.vector_stores.file_batches.create_and_poll(
                        vector_store_id=vector_store.id, file_ids=[file_id]
                    )
-   
+
                    assistant = client.beta.assistants.create(
                        name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
                        instructions=st.session_state.instructions,
@@ -701,7 +702,7 @@ def run_main_app():
                        tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}}
                    )
                    st.session_state.assistant_id = assistant.id
-   
+
                    if not st.session_state.threads:
                        thread = client.beta.threads.create()
                        st.session_state.threads.append({
@@ -713,13 +714,13 @@ def run_main_app():
                        })
                        st.session_state.thread_id = thread.id
                        save_app_state(st.session_state.user_id)
-   
+
                    st.session_state.assistant_setup_complete = True
                    st.success("✅ Assistant is ready with the latest information!")
            except Exception as e:
                st.error(f"❌ Error setting up assistant: {str(e)}")
                st.stop()
-   
+
        client = OpenAI(api_key=st.session_state.api_key)
        st.sidebar.subheader("🧵 Your Threads")
        thread_options = [f"{i+1}: {t['start_time'].split('T')[0]} | {t.get('model', 'N/A')} | {t.get('instruction_name', 'N/A')}" for i, t in enumerate(st.session_state.threads)]
@@ -730,7 +731,7 @@ def run_main_app():
            selected_idx = st.sidebar.selectbox("Select Thread", range(len(thread_options)), format_func=lambda x: thread_options[x], index=current_idx)
            selected_thread_info = st.session_state.threads[selected_idx]
            st.session_state.thread_id = selected_thread_info['thread_id']
-   
+
        if st.sidebar.button("➕ Start New Thread"):
            thread = client.beta.threads.create()
            new_thread_obj = {
@@ -744,37 +745,37 @@ def run_main_app():
            st.session_state.thread_id = thread.id
            save_app_state(st.session_state.user_id)
            st.rerun()
-   
+
        st.subheader("💬 Ask your question about the GTI SOP")
-   
+
        if selected_thread_info:
            st.info(f"🔧 Current: {selected_thread_info.get('model', 'unknown')} | {selected_thread_info.get('instruction_name', 'unknown')}")
-   
+
            for msg in selected_thread_info['messages']:
                with st.chat_message("user"):
                    st.markdown(msg["user"])
                with st.chat_message("assistant"):
                    st.markdown(msg["assistant"])
-   
+
            user_input = st.chat_input("Ask your question here...")
-   
+
            if user_input:
                try:
                    selected_thread_info["messages"].append({"user": user_input, "assistant": ""})
                    with st.chat_message("user"):
                        st.markdown(user_input)
-   
+
                    client.beta.threads.messages.create(
                        thread_id=selected_thread_info["thread_id"],
                        role="user",
                        content=user_input
                    )
-   
+
                    run = client.beta.threads.runs.create_and_poll(
                        thread_id=selected_thread_info["thread_id"],
                        assistant_id=st.session_state.assistant_id
                    )
-   
+
                    if run.status == 'completed':
                        messages = client.beta.threads.messages.list(thread_id=selected_thread_info["thread_id"])
                        assistant_reply = next(
@@ -785,13 +786,13 @@ def run_main_app():
                        with st.chat_message("assistant"):
                            st.markdown(assistant_reply)
                            maybe_show_referenced_images(assistant_reply)
-   
+
                        save_app_state(st.session_state.user_id)
-   
+
                    else:
                        st.error(f"❌ Run failed with status: {run.status}")
                        selected_thread_info["messages"].pop()
-   
+
                except Exception as e:
                    st.error(f"❌ Error processing your request: {str(e)}")
                    st.session_state.assistant_setup_complete = False
