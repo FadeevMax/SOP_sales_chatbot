@@ -385,7 +385,7 @@ def maybe_show_referenced_images(answer_text):
     except Exception as e:
         st.warning(f"⚠️ Could not load referenced image: {e}")
        
- def maybe_show_referenced_images(answer_text):
+def maybe_show_referenced_images(answer_text):
     map = load_map_from_github()
     if not map:
         return
