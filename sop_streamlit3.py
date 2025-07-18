@@ -137,6 +137,11 @@ Only reference an image if it is directly relevant and supports your answer.
 Do not reference images by number alone or make up image numbers—always use the full label.
 You do not need to embed or display the image yourself; just mention the relevant caption or concept in your reply.
 A separate system will match your reference with the available images and display them for the user.
+
+When referencing an image, you must copy and paste the full label exactly as it appears in the SOP.
+For example, if the SOP has a label "Image 3: . Product split between case and loose units (for requested 300+ units)", your answer must include that exact phrase.
+Never paraphrase or summarize image labels.
+Only answers that mention the full caption, exactly, will show the related image to the user.
 """
 CACHE_DIR = "cache"
 PDF_CACHE_PATH = os.path.join(CACHE_DIR, "cached_sop.pdf")
