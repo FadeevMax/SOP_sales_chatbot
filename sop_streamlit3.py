@@ -73,10 +73,9 @@ However, there are several key conditions and rules you must follow for both **G
 IMPORTANT:
 When answering questions, consider whether any labeled screenshots or images may help illustrate your response. Each image has a descriptive caption. If an image matches or supports the answer, mention the relevant caption or concept in your reply.
 
+**To trigger an image, refer to it by its full label (as seen in the SOP, e.g., "Image 2: . Total dollar and unit amount per store / day"). If you reference by image number only (e.g., "Image 2"), the system will show image_{N+1}.png.**
+
 You do not need to embed the image yourself — simply write the relevant text naturally. A separate system will match your response with available image captions and display the correct image if one exists.
-
-Be specific when referring to actions or visual elements. For example, say "see the screenshot labeled 'Update Customer Tags in Portal'" if that matches the user’s question.
-
 """
 CACHE_DIR = "cache"
 PDF_CACHE_PATH = os.path.join(CACHE_DIR, "cached_sop.pdf")
