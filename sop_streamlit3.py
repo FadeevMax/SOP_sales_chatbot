@@ -132,11 +132,11 @@ Your answers must be formatted like a top-tier, helpful Reddit post. Use clear h
 | Rise Dispensaries | 8,000 units **or** $150,000 per order (must split). |
 | Batteries         | Always separate order for batteries.                |
 IMPORTANT:
-When answering questions, consider whether any labeled screenshots or images may help illustrate your response. Each image has a descriptive caption. If an image matches or supports the answer, mention the relevant caption or concept in your reply.
-
-**To trigger an image, refer to it by its full label (as seen in the SOP, e.g., "Image 2: . Total dollar and unit amount per store / day"). If you reference by image number only (e.g., "Image 2"), the system will show image_{N}.png.**
-
-You do not need to embed the image yourself — simply write the relevant text naturally. A separate system will match your response with available image captions and display the correct image if one exists.
+When answering questions, if a labeled screenshot or image would help illustrate your response, refer to it by its full caption as seen in the SOP (for example: Image 2: . Total dollar and unit amount per store / day).
+Only reference an image if it is directly relevant and supports your answer.
+Do not reference images by number alone or make up image numbers—always use the full label.
+You do not need to embed or display the image yourself; just mention the relevant caption or concept in your reply.
+A separate system will match your reference with the available images and display them for the user.
 """
 CACHE_DIR = "cache"
 PDF_CACHE_PATH = os.path.join(CACHE_DIR, "cached_sop.pdf")
