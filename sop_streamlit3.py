@@ -874,7 +874,8 @@ def run_main_app():
                        selected_thread_info["messages"][-1]["assistant"] = assistant_reply
                        with st.chat_message("assistant"):
                            st.markdown(assistant_reply)
-                           maybe_show_referenced_images(assistant_reply)
+                           img_map = load_map_from_github()
+                           maybe_show_referenced_images(assistant_reply, img_map, GITHUB_REPO)
 
                        save_app_state(st.session_state.user_id)
 
