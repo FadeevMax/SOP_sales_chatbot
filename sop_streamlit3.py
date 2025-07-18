@@ -439,40 +439,15 @@ def download_gdoc_as_docx(doc_id, creds, out_path):
    return True
 
 def maybe_show_referenced_images(answer_text, img_map, github_repo):
-    import re
     import streamlit as st
-    import difflib
 
-    img_mentions = re.findall(r"(Image\s*\d+)", answer_text, re.IGNORECASE)
     shown = set()
-    map_keys = list(img_map.keys())
-
-    for mention in img_mentions:
-        mention_lc = mention.lower()
-        # Try exact full label match
-        exact_matches = [k for k in map_keys if k.lower() == mention_lc]
-        if exact_matches:
-            caption = exact_matches[0]
-        else:
-            # Try startswith (partial label match)
-            sw_matches = [k for k in map_keys if k.lower().startswith(mention_lc)]
-            if sw_matches:
-                caption = sw_matches[0]
-            else:
-                # Fuzzy match
-                best = difflib.get_close_matches(mention_lc, [k.lower() for k in map_keys], n=1, cutoff=0.6)
-                if best:
-                    idx = [k.lower() for k in map_keys].index(best[0])
-                    caption = map_keys[idx]
-                else:
-                    continue  # No match at all
-
-        # Show only once per caption
-        if caption and caption not in shown:
-            url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_map[caption]}"
-            st.image(url, caption=caption)
-            shown.add(caption)
-
+    for label in img_map.keys():
+        # If the exact label is in the answer text (case-insensitive)
+        if label.lower() in answer_text.lower() and label not in shown:
+            url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_map[label]}"
+            st.image(url, caption=label)
+            shown.add(label)
 
 def get_gdoc_last_modified(creds, doc_name):
     drive_service = build('drive', 'v3', credentials=creds)
