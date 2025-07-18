@@ -385,26 +385,44 @@ def download_gdoc_as_docx(doc_id, creds, out_path):
 def maybe_show_referenced_images(answer_text, map, github_repo):
     import re
     import streamlit as st
+    import difflib
 
     img_mentions = re.findall(r"(Image\s*\d+)", answer_text, re.IGNORECASE)
     img_mentions = [m.strip().lower() for m in img_mentions]
     shown = set()
 
-    # 1. Try to match by "Image X" at start of key
+    # 1. Try to match by "Image X" at start of key (full label match)
     for mention in img_mentions:
-        # Try n+1 logic if mention is just "image n"
+        for caption in map:
+            if caption.lower().startswith(mention):
+                url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
+                if caption not in shown:
+                    st.image(url, caption=caption)
+                    shown.add(caption)
+                    break  # Only show once
+
+    # 2. Fallback: if not shown, try n+1 logic
+    for mention in img_mentions:
         m = re.match(r'image\s*(\d+)', mention)
         if m:
             img_num = int(m.group(1))
-            img_file = f"image_{img_num + 1}.png"
-            # If that file exists in your image dir, show it directly
+            img_file = f"image_{img_num+1}.png"
             url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_file}"
-            try:
-                # Try showing, if it works, show and mark as shown
-                st.image(url, caption=f"Image {img_num}: (auto n+1)")
-                shown.add(img_file)
-            except Exception:
-                pass  # ignore if file doesn't exist
+            if img_file not in shown:
+                try:
+                    st.image(url, caption=f"Image {img_num} (auto n+1 fallback)")
+                    shown.add(img_file)
+                except Exception:
+                    pass  # If file doesn't exist, ignore
+
+    # 3. Fuzzy match to full labels if not already shown
+    for caption in map:
+        phrases = re.findall(r'(Image\s*\d+\:?[^\n\.]*)', answer_text, re.IGNORECASE)
+        best = difflib.get_close_matches(caption.lower(), [p.lower() for p in phrases], n=1, cutoff=0.7)
+        if best and caption not in shown:
+            url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{map[caption]}"
+            st.image(url, caption=caption)
+            shown.add(caption)
 
     # 3. Fuzzy match: for any caption that is 'similar' to a sentence in the answer
     for caption in map:
