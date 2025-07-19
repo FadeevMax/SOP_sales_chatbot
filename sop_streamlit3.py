@@ -637,7 +637,7 @@ st.session_state.user_id = user_id
 
 initialize_session_state()
 
-if not st.session_state.authenticated:
+if not st.session_state.get("authenticated", False):
     st.title("🔐 GTI SOP Sales Coordinator Login")
     pwd = st.text_input("Enter password or full API key:", type="password")
     if st.button("Submit"):
