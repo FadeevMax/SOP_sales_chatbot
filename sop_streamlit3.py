@@ -471,33 +471,33 @@ def run_main_app():
        col1, col2 = st.columns(2)
        with col1:
            models = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"]
-           old_model = st.session_state.model
+           old_model = st.session_state.get("model", "gpt-4o")
            new_model = st.selectbox("Choose model:", models, index=models.index(old_model))
        with col2:
-           instruction_names = list(st.session_state.custom_instructions.keys())
-           old_instruction = st.session_state.current_instruction_name
+           instruction_names = list(st.session_state.get("custom_instructions", {"Default": DEFAULT_INSTRUCTIONS}).keys())
+           old_instruction = st.session_state.get("current_instruction_name", "Default")
            new_instruction = st.selectbox("Choose instructions:", instruction_names, index=instruction_names.index(old_instruction))
 
        settings_changed = (old_model != new_model) or (old_instruction != new_instruction)
        if settings_changed:
            st.warning("⚠️ Settings changed. You need to start a new thread to apply these changes.")
            if st.button("🆕 Start New Thread with New Settings"):
-               st.session_state.model = new_model
-               st.session_state.current_instruction_name = new_instruction
-               st.session_state.instructions = st.session_state.custom_instructions[new_instruction]
-               st.session_state.assistant_setup_complete = False
+               st.session_state["model"] = new_model
+               st.session_state["current_instruction_name"] = new_instruction
+               st.session_state["instructions"] = st.session_state.get("custom_instructions", {"Default": DEFAULT_INSTRUCTIONS})[new_instruction]
+               st.session_state["assistant_setup_complete"] = False
                client = OpenAI(api_key=st.session_state.api_key)
                thread = client.beta.threads.create()
                new_thread_obj = {"thread_id": thread.id, "messages": [], "start_time": datetime.now().isoformat(), "model": new_model, "instruction_name": new_instruction}
-               st.session_state.threads.append(new_thread_obj)
-               st.session_state.thread_id = thread.id
+               st.session_state["threads"] = st.session_state.get("threads", []) + [new_thread_obj]
+               st.session_state["thread_id"] = thread.id
                save_app_state(st.session_state.user_id)
                st.success("✅ New thread created with updated settings!")
                st.rerun()
        else:
-           st.session_state.model = new_model
-           st.session_state.current_instruction_name = new_instruction
-           st.session_state.instructions = st.session_state.custom_instructions[new_instruction]
+           st.session_state["model"] = new_model
+           st.session_state["current_instruction_name"] = new_instruction
+           st.session_state["instructions"] = st.session_state.get("custom_instructions", {"Default": DEFAULT_INSTRUCTIONS})[new_instruction]
 
        if not st.session_state.get('assistant_setup_complete', False):
            try:
@@ -546,14 +546,14 @@ def run_main_app():
 
        client = OpenAI(api_key=st.session_state.api_key)
        st.sidebar.subheader("🧵 Your Threads")
-       thread_options = [f"{i+1}: {t['start_time'].split('T')[0]} | {t.get('model', 'N/A')} | {t.get('instruction_name', 'N/A')}" for i, t in enumerate(st.session_state.threads)]
-       thread_ids = [t['thread_id'] for t in st.session_state.threads]
+       thread_options = [f"{i+1}: {t['start_time'].split('T')[0]} | {t.get('model', 'N/A')} | {t.get('instruction_name', 'N/A')}" for i, t in enumerate(st.session_state.get('threads', []))]
+       thread_ids = [t['thread_id'] for t in st.session_state.get('threads', [])]
        selected_thread_info = None
        if thread_options:
-           current_idx = thread_ids.index(st.session_state.thread_id) if 'thread_id' in st.session_state and st.session_state.thread_id in thread_ids else 0
+           current_idx = thread_ids.index(st.session_state.get('thread_id')) if 'thread_id' in st.session_state and st.session_state.get('thread_id') in thread_ids else 0
            selected_idx = st.sidebar.selectbox("Select Thread", range(len(thread_options)), format_func=lambda x: thread_options[x], index=current_idx)
-           selected_thread_info = st.session_state.threads[selected_idx]
-           st.session_state.thread_id = selected_thread_info['thread_id']
+           selected_thread_info = st.session_state.get('threads', [])[selected_idx]
+           st.session_state["thread_id"] = selected_thread_info['thread_id']
 
        if st.sidebar.button("➕ Start New Thread"):
            thread = client.beta.threads.create()
