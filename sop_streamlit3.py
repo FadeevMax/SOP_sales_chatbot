@@ -444,12 +444,12 @@ def run_main_app():
         try:
             response = requests.get(github_pdf_url)
             if response.status_code == 200:
-                 open(PDF_CACHE_PATH, "wb") as f:
+                with open(PDF_CACHE_PATH, "wb") as f:
                     f.write(response.content)
                 last_modified_time = os.path.getmtime(PDF_CACHE_PATH)
                 last_modified_dt = datetime.fromtimestamp(last_modified_time)
                 st.write(f"SOP last updated locally: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
-                 open(PDF_CACHE_PATH, "rb") as pdf_file:
+                with open(PDF_CACHE_PATH, "rb") as pdf_file:
                     st.download_button(
                         label="⬇️ Download Live SOP as PDF",
                         data=pdf_file,
@@ -466,11 +466,11 @@ def run_main_app():
     elif page == "🤖 Chatbot":
        st.title("🤖 GTI SOP Sales Coordinator")
        col1, col2 = st.columns(2)
-        col1:
+       with col1:
            models = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"]
            old_model = st.session_state.model
            new_model = st.selectbox("Choose model:", models, index=models.index(old_model))
-        col2:
+       with col2:
            instruction_names = list(st.session_state.custom_instructions.keys())
            old_instruction = st.session_state.current_instruction_name
            new_instruction = st.selectbox("Choose instructions:", instruction_names, index=instruction_names.index(old_instruction))
@@ -478,7 +478,7 @@ def run_main_app():
        settings_changed = (old_model != new_model) or (old_instruction != new_instruction)
        if settings_changed:
            st.warning("⚠️ Settings changed. You need to start a new thread to apply these changes.")
-           if st.button("🆕 Start New Thread  New Settings"):
+           if st.button("🆕 Start New Thread with New Settings"):
                st.session_state.model = new_model
                st.session_state.current_instruction_name = new_instruction
                st.session_state.instructions = st.session_state.custom_instructions[new_instruction]
@@ -489,7 +489,7 @@ def run_main_app():
                st.session_state.threads.append(new_thread_obj)
                st.session_state.thread_id = thread.id
                save_app_state(st.session_state.user_id)
-               st.success("✅ New thread created  updated settings!")
+               st.success("✅ New thread created with updated settings!")
                st.rerun()
        else:
            st.session_state.model = new_model
@@ -504,20 +504,17 @@ def run_main_app():
                    st.error("Could not retrieve the SOP PDF. Assistant setup failed.")
                    st.stop()
 
-                st.spinner("Setting up AI assistant  the latest data..."):
+               with st.spinner("Setting up AI assistant with the latest data..."):
                    client = OpenAI(api_key=st.session_state.api_key)
-	           enriched_chunks = load_or_generate_enriched_chunks()
-		
-		   # Step 3: Create embeddings for enriched_chunks
-		   # This replaces file upload for assistant context
-		   vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
-		   for chunk in enriched_chunks:
-		      vector_store.embeddings.create(
-		         input=chunk["chunk_text"],
-			 metadata={"image_labels": chunk["image_labels"], "image_files": chunk["image_files"]}
-		     )
+                   file_response = client.files.create(file=open(st.session_state.file_path, "rb"), purpose="assistants")
+                   file_id = file_response.id
 
-                    assistant = client.beta.assistants.create(
+                   vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
+                   client.vector_stores.file_batches.create_and_poll(
+                       vector_store_id=vector_store.id, file_ids=[file_id]
+                   )
+
+                   assistant = client.beta.assistants.create(
                        name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
                        instructions=st.session_state.instructions,
                        model=st.session_state.model,
@@ -539,7 +536,7 @@ def run_main_app():
                        save_app_state(st.session_state.user_id)
 
                    st.session_state.assistant_setup_complete = True
-                   st.success("✅ Assistant is ready  the latest information!")
+                   st.success("✅ Assistant is ready with the latest information!")
            except Exception as e:
                st.error(f"❌ Error setting up assistant: {str(e)}")
                st.stop()
