@@ -372,7 +372,7 @@ def run_main_app():
                             st.success(f"✅ Instruction '{new_name}' saved.")
                             st.rerun()
                         else:
-                            st.error("❌ An instruction  this name already exists.")
+                            st.error("❌ An instruction with this name already exists.")
                     else:
                         st.error("❌ Please provide both a name and content.")
             if st.button("✖️ Cancel"):
@@ -380,8 +380,8 @@ def run_main_app():
                 st.rerun()
 
         else:
-             col1, col2 = st.columns([3, 1])
-             col1:
+            col1, col2 = st.columns([3, 1])
+            with col1:
                 instruction_names = list(st.session_state.custom_instructions.keys())
                 if st.session_state.current_instruction_name not in instruction_names:
                     st.session_state.current_instruction_name = "Default"
@@ -391,7 +391,7 @@ def run_main_app():
                     index=instruction_names.index(st.session_state.current_instruction_name)
                 )
                 st.session_state.current_instruction_name = selected_instruction
-             col2:
+            with col2:
                 st.write("")
                 st.write("")
                 if st.button("➕ Create New Instruction"):
@@ -409,14 +409,14 @@ def run_main_app():
             )
             if not is_default:
                 c1, c2 = st.columns(2)
-                 c1:
+                with c1:
                     if st.button("📂 Save Changes"):
                         st.session_state.custom_instructions[selected_instruction] = instruction_content
                         st.session_state.instructions = instruction_content
                         st.session_state.assistant_setup_complete = False
                         save_app_state(st.session_state.user_id)
                         st.success(f"✅ '{selected_instruction}' instructions saved.")
-                 c2:
+                with c2:
                     if st.button("🗑️ Delete Instruction"):
                         del st.session_state.custom_instructions[selected_instruction]
                         st.session_state.current_instruction_name = "Default"
