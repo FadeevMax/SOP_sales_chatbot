@@ -380,7 +380,7 @@ def run_main_app():
                 st.rerun()
 
         else:
-            col1, col2 = st.columns([3, 1])
+             col1, col2 = st.columns([3, 1])
              col1:
                 instruction_names = list(st.session_state.custom_instructions.keys())
                 if st.session_state.current_instruction_name not in instruction_names:
