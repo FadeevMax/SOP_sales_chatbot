@@ -194,31 +194,50 @@ from docx import Document
 import os
 import re
 import json
+from docx import Document
+from docx.oxml.table import CT_Tbl
+from docx.oxml.text.paragraph import CT_P
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+from docx.oxml.ns import qn
 
 ENRICHED_CHUNKS_PATH = os.path.join(CACHE_DIR, "enriched_chunks.json")
 
-def get_file_modified_time(filepath):
-    if os.path.exists(filepath):
-        return datetime.fromtimestamp(os.path.getmtime(filepath))
+caption_pattern = re.compile(r"^Image\s+(\d+):?\s*(.*)", re.IGNORECASE)
+
+def clean_caption(text):
+    cleaned = unicodedata.normalize('NFKC', text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = cleaned.replace("–", "-").replace("—", "-").replace("“", '"').replace("”", '"')
+    cleaned = cleaned.replace("‘", "'").replace("’", "'")
+    return cleaned
+
+def extract_label(text):
+    text = clean_caption(text)
+    m = caption_pattern.match(text)
+    if m:
+        idx = int(m.group(1))
+        desc = m.group(2).strip().rstrip(".")
+        return f"Image {idx}: {desc}" if desc else f"Image {idx}"
     return None
 
-
-    def clean_caption(text):
-        cleaned = unicodedata.normalize('NFKC', text)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-        cleaned = cleaned.replace("–", "-").replace("—", "-").replace("“", '"').replace("”", '"')
-        cleaned = cleaned.replace("‘", "'").replace("’", "'")
-        return cleaned
-
-    def extract_label(text):
-        text = clean_caption(text)
-        m = caption_pattern.match(text)
-        if m:
-            idx = int(m.group(1))
-            desc = m.group(2).strip().rstrip(".")
-            return f"Image {idx}: {desc}" if desc else f"Image {idx}"
-        return None
-
+def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
+    """Extract images and their labels from a DOCX file"""
+    from docx import Document
+    from docx.document import Document as DocxDocument
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    from docx.oxml.ns import qn
+    import os
+    import json
+    import re
+    # Ensure output directory exists
+    os.makedirs(image_output_dir, exist_ok=True)
+    doc = Document(docx_path)
+    image_map = {}
+    items = []
     # Collect all blocks in order
     body = doc.element.body
     for child in body.iterchildren():
@@ -317,8 +336,6 @@ def update_pdf_on_github(local_pdf_path):
 
 
 
-
-@st.cache_data(ttl=600) # Cache the result for 10 minutes (600 seconds)
 
 # --- Session State Initialization Function ---
 def initialize_session_state():
