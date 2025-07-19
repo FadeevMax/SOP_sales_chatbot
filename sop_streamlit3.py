@@ -505,16 +505,16 @@ def run_main_app():
                    st.stop()
 
                with st.spinner("Setting up AI assistant with the latest data..."):
-                   client = OpenAI(api_key=st.session_state.api_key)
+                  client = OpenAI(api_key=st.session_state.api_key)
 		   # Step 1: Chunk DOCX with image labels
-		   enriched_chunks = load_or_generate_enriched_chunks()
+	          enriched_chunks = load_or_generate_enriched_chunks()
 		
 		   # Step 3: Create embeddings for enriched_chunks
 		   # This replaces file upload for assistant context
-		   vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
-		   for chunk in enriched_chunks:
-			vector_store.embeddings.create(
-			input=chunk["chunk_text"],
+		  vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
+		  for chunk in enriched_chunks:
+		     vector_store.embeddings.create(
+		        input=chunk["chunk_text"],
 			metadata={"image_labels": chunk["image_labels"], "image_files": chunk["image_files"]}
 		    )
 
