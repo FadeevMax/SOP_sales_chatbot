@@ -246,13 +246,45 @@ def semantic_chunking_docx(docx_path, model_name='all-MiniLM-L6-v2', buffer_size
 
 def enrich_chunks_with_images_semantic(chunks, image_map_path):
     """
-    Attach image information to semantically chunked content
+    Improved version - attach image information to semantically chunked content
     """
+    import re
+    from difflib import SequenceMatcher
+    
     try:
         with open(image_map_path, "r") as f:
             image_map = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         image_map = {}
+    
+    def extract_image_numbers(text):
+        """Extract image numbers from text"""
+        patterns = [
+            r"Image\s+(\d+)",
+            r"Figure\s+(\d+)",
+        ]
+        numbers = []
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            numbers.extend([int(n) for n in matches])
+        return list(set(numbers))  # Remove duplicates
+    
+    def find_best_match(image_num, image_map):
+        """Find best matching image for a number"""
+        best_match = None
+        best_score = 0
+        
+        for image_key, image_file in image_map.items():
+            # Extract number from image key
+            key_numbers = re.findall(r"Image\s+(\d+)", image_key, re.IGNORECASE)
+            if key_numbers and int(key_numbers[0]) == image_num:
+                # Calculate similarity score
+                score = 1.0
+                if best_score < score:
+                    best_score = score
+                    best_match = (image_key, image_file)
+        
+        return best_match
     
     enriched_chunks = []
     
@@ -260,31 +292,20 @@ def enrich_chunks_with_images_semantic(chunks, image_map_path):
         # Combine all text in chunk
         chunk_text = '\n'.join([s['sentence'] for s in chunk])
         
-        # Find all image references in this chunk
+        # Find image numbers in text
+        image_numbers = extract_image_numbers(chunk_text)
+        
+        # Match images
         image_labels = []
         image_files = []
         
-        for sentence in chunk:
-            if sentence.get('is_caption', False):
-                label = sentence['sentence']
-                image_labels.append(label)
-                
-                # Try exact match first
-                if label in image_map:
-                    image_files.append({"label": label, "file": image_map[label]})
-                else:
-                    # Try fuzzy matching for image labels
-                    for map_label, filename in image_map.items():
-                        if (label.lower() in map_label.lower() or 
-                            map_label.lower() in label.lower()):
-                            image_files.append({"label": map_label, "file": filename})
-                            break
-        
-        # Also check for any image references in non-caption text
-        for map_label, filename in image_map.items():
-            if map_label.lower() in chunk_text.lower() and map_label not in image_labels:
-                image_labels.append(map_label)
-                image_files.append({"label": map_label, "file": filename})
+        for img_num in image_numbers:
+            match = find_best_match(img_num, image_map)
+            if match:
+                label, filename = match
+                if label not in image_labels:  # Avoid duplicates
+                    image_labels.append(label)
+                    image_files.append({"label": label, "file": filename})
         
         enriched_chunks.append({
             "chunk_id": chunk_idx,
