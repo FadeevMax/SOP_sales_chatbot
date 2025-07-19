@@ -160,6 +160,107 @@ import os
 import re
 import json
 
+ENRICHED_CHUNKS_PATH = os.path.join(CACHE_DIR, "enriched_chunks.json")
+
+def get_file_modified_time(filepath):
+    if os.path.exists(filepath):
+        return datetime.fromtimestamp(os.path.getmtime(filepath))
+    return None
+
+def load_or_generate_enriched_chunks():
+    """
+    Returns enriched_chunks either from cache or reprocesses the DOCX and image_map.
+    Skips reprocessing if enriched_chunks is newer than DOCX and image_map.
+    """
+    docx_mtime = get_file_modified_time(DOCX_LOCAL_PATH)
+    map_mtime = get_file_modified_time(IMAGE_MAP_PATH)
+    chunks_mtime = get_file_modified_time(ENRICHED_CHUNKS_PATH)
+
+    if (
+        chunks_mtime and
+        docx_mtime and
+        map_mtime and
+        chunks_mtime > docx_mtime and
+        chunks_mtime > map_mtime
+    ):
+        # Use cached version
+        with open(ENRICHED_CHUNKS_PATH, "r") as f:
+            return json.load(f)
+
+    # Reprocess everything
+    chunks = chunk_docx_with_images(DOCX_LOCAL_PATH)
+    enriched_chunks = enrich_chunks_with_images(chunks, IMAGE_MAP_PATH)
+
+    # Save to disk
+    with open(ENRICHED_CHUNKS_PATH, "w") as f:
+        json.dump(enriched_chunks, f, indent=2)
+
+    return enriched_chunks
+
+def chunk_docx_with_images(docx_path):
+    """
+    Chunks a DOCX so that image captions (e.g., 'Image 3: ...') stay with surrounding text.
+    Returns: List of dicts: [{'chunk_text': ..., 'image_labels': [...]}, ...]
+    """
+    doc = Document(docx_path)
+    caption_pattern = re.compile(r"Image\s*\d+[\s\-–—:]*.*", re.IGNORECASE)
+    def clean(text):
+        return unicodedata.normalize('NFKC', text).strip()
+
+    chunks = []
+    buffer = []
+    current_images = []
+
+    for para in doc.paragraphs:
+        text = clean(para.text)
+        if not text:
+            continue
+        # Detect image caption
+        if caption_pattern.match(text):
+            # If buffer has text, flush as its own chunk (if not already an image chunk)
+            if buffer:
+                chunks.append({
+                    "chunk_text": "\n".join(buffer).strip(),
+                    "image_labels": current_images.copy()
+                })
+                buffer.clear()
+                current_images.clear()
+            # Start new chunk with the image caption
+            buffer.append(text)
+            current_images.append(text)
+            # Optionally, also flush image captions as their own chunk
+            chunks.append({
+                "chunk_text": text,
+                "image_labels": [text]
+            })
+            buffer.clear()
+            current_images.clear()
+        else:
+            buffer.append(text)
+    # Flush remaining
+    if buffer:
+        chunks.append({
+            "chunk_text": "\n".join(buffer).strip(),
+            "image_labels": current_images.copy()
+        })
+    return [c for c in chunks if c["chunk_text"].strip()]
+
+def enrich_chunks_with_images(chunks, image_map_path):
+    """
+    Attach image file names to each chunk if its label appears in the map.
+    Returns: list of dicts with chunk_text, image_labels, image_files
+    """
+    with open(image_map_path, "r") as f:
+        image_map = json.load(f)
+    for chunk in chunks:
+        image_files = []
+        for label in chunk["image_labels"]:
+            imgfile = image_map.get(label)
+            if imgfile:
+                image_files.append({"label": label, "file": imgfile})
+        chunk["image_files"] = image_files
+    return chunks
+
 def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
     from docx.oxml.ns import qn
     from docx.oxml.table import CT_Tbl
@@ -320,6 +421,11 @@ def sync_gdoc_to_github(force=False):
     # Upload PDF and DOCX to GitHub
     pdf_uploaded = update_pdf_on_github(PDF_CACHE_PATH)
     docx_uploaded = update_docx_on_github(DOCX_LOCAL_PATH)
+    upload_file_to_github(
+    local_path=ENRICHED_CHUNKS_PATH,
+    github_path="enriched_chunks.json",
+    commit_message="Update enriched chunks"
+)
 
     if pdf_uploaded and docx_uploaded:
         st.success("PDF and DOCX updated on GitHub with the latest from Google Doc!")
@@ -785,13 +891,17 @@ def run_main_app():
 
                with st.spinner("Setting up AI assistant with the latest data..."):
                    client = OpenAI(api_key=st.session_state.api_key)
-                   file_response = client.files.create(file=open(st.session_state.file_path, "rb"), purpose="assistants")
-                   file_id = file_response.id
-
-                   vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
-                   client.vector_stores.file_batches.create_and_poll(
-                       vector_store_id=vector_store.id, file_ids=[file_id]
-                   )
+		   # Step 1: Chunk DOCX with image labels
+		   enriched_chunks = load_or_generate_enriched_chunks()
+		
+		   # Step 3: Create embeddings for enriched_chunks
+		   # This replaces file upload for assistant context
+		   vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
+		   for chunk in enriched_chunks:
+			vector_store.embeddings.create(
+			input=chunk["chunk_text"],
+			metadata={"image_labels": chunk["image_labels"], "image_files": chunk["image_files"]}
+		    )
 
                    assistant = client.beta.assistants.create(
                        name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
