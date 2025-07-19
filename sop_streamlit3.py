@@ -47,17 +47,21 @@ import requests
 import base64
 import unicodedata
 
-CACHE_DIR = "cache"
-PDF_CACHE_PATH = os.path.join(CACHE_DIR, "cached_sop.pdf")
-GDOC_STATE_PATH = os.path.join(CACHE_DIR, "gdoc_state.json")
-GITHUB_PDF_NAME = "Live_GTI_SOP.pdf"
-GITHUB_REPO = "FadeevMax/SOP_sales_chatbot"
-GITHUB_TOKEN = st.secrets["GitHub_API"]
-GOOGLE_DOC_NAME = "GTI Data Base and SOP"
-STATE_DIR = "user_data"
-DOCX_LOCAL_PATH = os.path.join(CACHE_DIR, "sop.docx")
-IMAGE_DIR = os.path.join(CACHE_DIR, "images")
-IMAGE_MAP_PATH = os.path.join(CACHE_DIR, "image_map.json")
+from utils.config import (
+    CACHE_DIR,
+    PDF_CACHE_PATH,
+    GDOC_STATE_PATH,
+    GITHUB_PDF_NAME,
+    GITHUB_REPO,
+    GITHUB_TOKEN,
+    GOOGLE_DOC_NAME,
+    STATE_DIR,
+    DOCX_LOCAL_PATH,
+    IMAGE_DIR,
+    IMAGE_MAP_PATH,
+    ENRICHED_CHUNKS_PATH,
+)
+
 
 from docx import Document
 import os
