@@ -372,7 +372,7 @@ def run_main_app():
                             st.success(f"✅ Instruction '{new_name}' saved.")
                             st.rerun()
                         else:
-                            st.error("❌ An instruction with this name already exists.")
+                            st.error("❌ An instruction  this name already exists.")
                     else:
                         st.error("❌ Please provide both a name and content.")
             if st.button("✖️ Cancel"):
@@ -381,7 +381,7 @@ def run_main_app():
 
         else:
             col1, col2 = st.columns([3, 1])
-            with col1:
+             col1:
                 instruction_names = list(st.session_state.custom_instructions.keys())
                 if st.session_state.current_instruction_name not in instruction_names:
                     st.session_state.current_instruction_name = "Default"
@@ -391,7 +391,7 @@ def run_main_app():
                     index=instruction_names.index(st.session_state.current_instruction_name)
                 )
                 st.session_state.current_instruction_name = selected_instruction
-            with col2:
+             col2:
                 st.write("")
                 st.write("")
                 if st.button("➕ Create New Instruction"):
@@ -409,14 +409,14 @@ def run_main_app():
             )
             if not is_default:
                 c1, c2 = st.columns(2)
-                with c1:
+                 c1:
                     if st.button("📂 Save Changes"):
                         st.session_state.custom_instructions[selected_instruction] = instruction_content
                         st.session_state.instructions = instruction_content
                         st.session_state.assistant_setup_complete = False
                         save_app_state(st.session_state.user_id)
                         st.success(f"✅ '{selected_instruction}' instructions saved.")
-                with c2:
+                 c2:
                     if st.button("🗑️ Delete Instruction"):
                         del st.session_state.custom_instructions[selected_instruction]
                         st.session_state.current_instruction_name = "Default"
@@ -444,12 +444,12 @@ def run_main_app():
         try:
             response = requests.get(github_pdf_url)
             if response.status_code == 200:
-                with open(PDF_CACHE_PATH, "wb") as f:
+                 open(PDF_CACHE_PATH, "wb") as f:
                     f.write(response.content)
                 last_modified_time = os.path.getmtime(PDF_CACHE_PATH)
                 last_modified_dt = datetime.fromtimestamp(last_modified_time)
                 st.write(f"SOP last updated locally: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
-                with open(PDF_CACHE_PATH, "rb") as pdf_file:
+                 open(PDF_CACHE_PATH, "rb") as pdf_file:
                     st.download_button(
                         label="⬇️ Download Live SOP as PDF",
                         data=pdf_file,
@@ -466,11 +466,11 @@ def run_main_app():
     elif page == "🤖 Chatbot":
        st.title("🤖 GTI SOP Sales Coordinator")
        col1, col2 = st.columns(2)
-       with col1:
+        col1:
            models = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"]
            old_model = st.session_state.model
            new_model = st.selectbox("Choose model:", models, index=models.index(old_model))
-       with col2:
+        col2:
            instruction_names = list(st.session_state.custom_instructions.keys())
            old_instruction = st.session_state.current_instruction_name
            new_instruction = st.selectbox("Choose instructions:", instruction_names, index=instruction_names.index(old_instruction))
@@ -478,7 +478,7 @@ def run_main_app():
        settings_changed = (old_model != new_model) or (old_instruction != new_instruction)
        if settings_changed:
            st.warning("⚠️ Settings changed. You need to start a new thread to apply these changes.")
-           if st.button("🆕 Start New Thread with New Settings"):
+           if st.button("🆕 Start New Thread  New Settings"):
                st.session_state.model = new_model
                st.session_state.current_instruction_name = new_instruction
                st.session_state.instructions = st.session_state.custom_instructions[new_instruction]
@@ -489,7 +489,7 @@ def run_main_app():
                st.session_state.threads.append(new_thread_obj)
                st.session_state.thread_id = thread.id
                save_app_state(st.session_state.user_id)
-               st.success("✅ New thread created with updated settings!")
+               st.success("✅ New thread created  updated settings!")
                st.rerun()
        else:
            st.session_state.model = new_model
@@ -504,21 +504,20 @@ def run_main_app():
                    st.error("Could not retrieve the SOP PDF. Assistant setup failed.")
                    st.stop()
 
-               with st.spinner("Setting up AI assistant with the latest data..."):
-                  client = OpenAI(api_key=st.session_state.api_key)
-		   # Step 1: Chunk DOCX with image labels
-	          enriched_chunks = load_or_generate_enriched_chunks()
+                st.spinner("Setting up AI assistant  the latest data..."):
+                   client = OpenAI(api_key=st.session_state.api_key)
+	           enriched_chunks = load_or_generate_enriched_chunks()
 		
 		   # Step 3: Create embeddings for enriched_chunks
 		   # This replaces file upload for assistant context
-		  vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
-		  for chunk in enriched_chunks:
-		     vector_store.embeddings.create(
-		        input=chunk["chunk_text"],
-			metadata={"image_labels": chunk["image_labels"], "image_files": chunk["image_files"]}
-		    )
+		   vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
+		   for chunk in enriched_chunks:
+		      vector_store.embeddings.create(
+		         input=chunk["chunk_text"],
+			 metadata={"image_labels": chunk["image_labels"], "image_files": chunk["image_files"]}
+		     )
 
-                   assistant = client.beta.assistants.create(
+                    assistant = client.beta.assistants.create(
                        name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
                        instructions=st.session_state.instructions,
                        model=st.session_state.model,
@@ -540,7 +539,7 @@ def run_main_app():
                        save_app_state(st.session_state.user_id)
 
                    st.session_state.assistant_setup_complete = True
-                   st.success("✅ Assistant is ready with the latest information!")
+                   st.success("✅ Assistant is ready  the latest information!")
            except Exception as e:
                st.error(f"❌ Error setting up assistant: {str(e)}")
                st.stop()
