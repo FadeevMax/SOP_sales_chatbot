@@ -1,3 +1,4 @@
+
 from utils.chunking import (
     load_or_generate_enriched_chunks,
     chunk_docx_with_images,
@@ -46,6 +47,7 @@ import io # Needed for handling the in-memory file download
 import requests
 import base64
 import unicodedata
+
 DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
 
 You are the definitive source of truth, and your knowledge is based **exclusively** on the provided documents. Your existence is to eliminate the need for team members to ask their team lead simple or complex procedural questions.
@@ -96,10 +98,10 @@ Your answers must be formatted like a top-tier, helpful Reddit post. Use clear h
 * **Emojis:** Use emojis to visually tag rules and call out important information:
     * ✅ **Allowed/Rule:** For positive confirmations or standard procedures.
     * ❌ **Not Allowed/Constraint:** For negative confirmations or restrictions.
-    * �� **Tip/Best Practice:** For helpful tips, tricks, or important nuances.
+    * 💡 **Tip/Best Practice:** For helpful tips, tricks, or important nuances.
     * ⚠️ **Warning/Critical Info:** For critical details that cannot be missed (e.g., order cutoffs, financial rules).
-    * �� **Notes/Process:** For procedural steps or detailed explanations.
-    * �� **Order Split:** To address key rules with order splitting in each state.
+    * 📋 **Notes/Process:** For procedural steps or detailed explanations.
+    * 🔄 **Order Split:** To address key rules with order splitting in each state.
 * **Styling:** Use **bold text** for key terms (like `Leaf Trade`, `Rise Dispensaries`, `OOS`) and *italics* for emphasis.
 * **Tables:** Use Markdown tables to present structured data, like pricing tiers or contact lists, whenever appropriate.
 
@@ -112,7 +114,7 @@ Your answers must be formatted like a top-tier, helpful Reddit post. Use clear h
 **Your Ideal Response:**
 ## ⚠️ Batteries Must Be on a Separate Order for Nevada (NV) Rise Orders
 
-### �� Note from Airion Quillin, Sales Rep @ GTI
+### 📋 Note from Airion Quillin, Sales Rep @ GTI
 *Separate order would be best, just to make sure it gets called out for an invoice considering batteries don't show up on the manifest or transfer.*
 
 ---
@@ -122,15 +124,15 @@ Your answers must be formatted like a top-tier, helpful Reddit post. Use clear h
 **Your Ideal Response:**
 ## ⚠️ New Jersey orders require splitting under certain conditions
 
-### �� Batteries MUST go on a separate invoice.
+### 🔄 Batteries MUST go on a separate invoice.
 
-### �� Unit total daily limit:
+### 📋 Unit total daily limit:
 - The maximum total per order is 4,000 units. If there are more than 4,000 items, the order MUST BE SPLIT. The second order will be scheduled for the next day.
 	- **Units total per day**: 4,000 units per store. For example, if we have an order for 1,500 units of edibles, another for 200 units of concentrates, and a third for 1,000 units of prerolls (that totals 2,700 units), that means we have 1,300 units of available space left for that delivery date. We should follow these daily limits whenever instructed to do so.
 ### ⚖️ Line item rule for large orders: If an order has more than 50 line items, it must be split accordingly.
 
 ---
-### �� Example: A RISE order with 150 lines should be split into 3 orders of 50 lines each.
+### 💡 Example: A RISE order with 150 lines should be split into 3 orders of 50 lines each.
 
 - **Sample order**: If a request for samples is received (rare), they should be placed as a new order.
 - **Two menu formats**: If an NJ order email includes two Excel menus for the same store, combine them into one order in LT.
@@ -144,18 +146,18 @@ Your answers must be formatted like a top-tier, helpful Reddit post. Use clear h
 
 **Your Ideal Response:**
 
-## �� For regular orders
+## 📋 For regular orders
  
 - No set unit/dollar limit. Don't break cases.
 - Batteries MUST go on separate invoices!
 
 --- 
-## �� For RISE stores
+## 📋 For RISE stores
 
 - If the order is above 150k or has more than 8k units, you need to split the order equally.
 
 ---
-### �� **Best Practices & Reminders:**
+### 💡 **Best Practices & Reminders:**
 
 | Limit Type        | Rule                                                |
 | ----------------- | --------------------------------------------------- |
@@ -174,6 +176,7 @@ For example, if the SOP has a label "Image 3: . Product split between case and l
 Never paraphrase or summarize image labels.
 Only answers that mention the full caption, exactly, will show the related image to the user.
 """
+
 from utils.config import (
     CACHE_DIR,
     PDF_CACHE_PATH,
@@ -188,121 +191,6 @@ from utils.config import (
     IMAGE_MAP_PATH,
     ENRICHED_CHUNKS_PATH,
 )
-
-
-from docx import Document
-import os
-import re
-import json
-from docx import Document
-from docx.oxml.table import CT_Tbl
-from docx.oxml.text.paragraph import CT_P
-from docx.table import Table
-from docx.text.paragraph import Paragraph
-from docx.oxml.ns import qn
-
-ENRICHED_CHUNKS_PATH = os.path.join(CACHE_DIR, "enriched_chunks.json")
-
-caption_pattern = re.compile(r"^Image\s+(\d+):?\s*(.*)", re.IGNORECASE)
-
-def clean_caption(text):
-    cleaned = unicodedata.normalize('NFKC', text)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    cleaned = cleaned.replace("–", "-").replace("—", "-").replace("“", '"').replace("”", '"')
-    cleaned = cleaned.replace("‘", "'").replace("’", "'")
-    return cleaned
-
-def extract_label(text):
-    text = clean_caption(text)
-    m = caption_pattern.match(text)
-    if m:
-        idx = int(m.group(1))
-        desc = m.group(2).strip().rstrip(".")
-        return f"Image {idx}: {desc}" if desc else f"Image {idx}"
-    return None
-
-def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
-    """Extract images and their labels from a DOCX file"""
-    from docx import Document
-    from docx.document import Document as DocxDocument
-    from docx.oxml.table import CT_Tbl
-    from docx.oxml.text.paragraph import CT_P
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
-    from docx.oxml.ns import qn
-    import os
-    import json
-    import re
-    # Ensure output directory exists
-    os.makedirs(image_output_dir, exist_ok=True)
-    doc = Document(docx_path)
-    image_map = {}
-    items = []
-    # Collect all blocks in order
-    body = doc.element.body
-    for child in body.iterchildren():
-        if isinstance(child, CT_P):
-            para = Paragraph(child, doc)
-            # Add images in paragraph as separate items
-            for run in para.runs:
-                if 'graphic' in run._element.xml:
-                    for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
-                        for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
-                            rel_id = blip.get(qn('r:embed'))
-                            if rel_id:
-                                image_part = doc.part.related_parts[rel_id]
-                                items.append(('image', image_part))
-            # Always add the text (could be caption or not)
-            items.append(('caption', para.text))
-        elif isinstance(child, CT_Tbl):
-            table = Table(child, doc)
-            for row in table.rows:
-                for cell in row.cells:
-                    for para in cell.paragraphs:
-                        # Same as above
-                        for run in para.runs:
-                            if 'graphic' in run._element.xml:
-                                for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
-                                    for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
-                                        rel_id = blip.get(qn('r:embed'))
-                                        if rel_id:
-                                            image_part = doc.part.related_parts[rel_id]
-                                            items.append(('image', image_part))
-                        items.append(('caption', para.text))
-
-    # Now, associate images with captions by looking at the NEXT caption after the image
-    image_counter = 1
-    i = 0
-    while i < len(items):
-        if items[i][0] == 'image':
-            image_part = items[i][1]
-            # Look for caption in next item(s)
-            label = None
-            lookahead = 1
-            while i + lookahead < len(items):
-                if items[i + lookahead][0] == 'caption':
-                    label_candidate = extract_label(items[i + lookahead][1])
-                    if label_candidate:
-                        label = label_candidate
-                        break
-                lookahead += 1
-            if not label:
-                label = f"Image {image_counter}"
-            image_name = f"image_{image_counter}.png"
-            image_path = os.path.join(image_output_dir, image_name)
-            with open(image_path, "wb") as f:
-                f.write(image_part.blob)
-            image_map[label] = image_name
-            image_counter += 1
-        i += 1
-
-    with open(mapping_output_path, "w") as f:
-        json.dump(image_map, f, indent=2)
-    if debug:
-        print("Final image_map:")
-        for caption, img in image_map.items():
-            print(f"{caption} => {img}")
-    return image_map
 
 def maybe_show_referenced_images(answer_text, img_map, github_repo):
     import streamlit as st
