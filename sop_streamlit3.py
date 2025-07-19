@@ -1,9 +1,10 @@
 
 from utils.chunking import (
-    load_or_generate_enriched_chunks,
-    chunk_docx_with_images,
-    enrich_chunks_with_images,
-    extract_images_and_labels_from_docx
+    load_or_generate_enriched_chunks_semantic,  # Changed
+    semantic_chunking_docx,                     # Changed
+    enrich_chunks_with_images_semantic,         # Changed
+    extract_images_and_labels_from_docx,        # Same
+    analyze_chunks                              # New function (optional)
 )
 
 from utils.github import (
