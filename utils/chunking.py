@@ -150,29 +150,36 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
 
 def semantic_chunking_docx(docx_path, model_name='all-MiniLM-L6-v2', buffer_size=1, percentile=90, min_chunk_size=50):
     """
-    Semantic chunking of DOCX content with image association
+    Semantic chunking of DOCX content with image association.
+    Image captions are always grouped with the text above.
     """
     doc = Document(docx_path)
     model = SentenceTransformer(model_name)
-    
+
     # Extract all content with metadata
     content_items = []
     image_counter = 1
-    
+    prev_text_idx = None
+
     for para in doc.paragraphs:
         text = clean_caption(para.text.strip())
         if not text:
             continue
-            
-        # Check if this is an image caption
+
         is_caption = bool(caption_pattern.match(text))
-        
-        content_items.append({
-            'text': text,
-            'is_caption': is_caption,
-            'paragraph_index': len(content_items)
-        })
-    
+        if is_caption and prev_text_idx is not None:
+            # Group caption with previous text
+            content_items[prev_text_idx]['text'] += f"\n{text}"
+            content_items[prev_text_idx]['is_caption'] = True  # Mark chunk as having a caption
+            continue
+        else:
+            content_items.append({
+                'text': text,
+                'is_caption': is_caption,
+                'paragraph_index': len(content_items)
+            })
+            prev_text_idx = len(content_items) - 1
+
     # Filter out very short items and group sentences
     sentences = []
     for i, item in enumerate(content_items):
@@ -182,10 +189,10 @@ def semantic_chunking_docx(docx_path, model_name='all-MiniLM-L6-v2', buffer_size
                 'is_caption': item['is_caption'],
                 'original_index': i
             })
-    
+
     if not sentences:
         return []
-    
+
     # Create contextual buffers
     for i in range(len(sentences)):
         combo = []
@@ -193,15 +200,15 @@ def semantic_chunking_docx(docx_path, model_name='all-MiniLM-L6-v2', buffer_size
             if 0 <= j < len(sentences):
                 combo.append(sentences[j]['sentence'])
         sentences[i]['combined'] = ' '.join(combo)
-    
+
     # Generate embeddings
     if len(sentences) > 1:
         combined_texts = [s['combined'] for s in sentences]
         embeddings = model.encode(combined_texts, convert_to_numpy=True)
-        
+
         for i, emb in enumerate(embeddings):
             sentences[i]['embedding'] = emb
-        
+
         # Compute cosine distances
         distances = []
         for i in range(len(sentences) - 1):
@@ -210,7 +217,7 @@ def semantic_chunking_docx(docx_path, model_name='all-MiniLM-L6-v2', buffer_size
             dist = 1 - (np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
             distances.append(dist)
             sentences[i]['distance_to_next'] = dist
-        
+
         # Find breakpoints
         if distances:
             threshold = np.percentile(distances, percentile)
@@ -219,44 +226,45 @@ def semantic_chunking_docx(docx_path, model_name='all-MiniLM-L6-v2', buffer_size
             breakpoints = []
     else:
         breakpoints = []
-    
+
     # Create chunks
     chunks = []
     start = 0
-    
+
     for bp in breakpoints:
         end = bp + 1
         chunk_sentences = sentences[start:end]
         if chunk_sentences:
             chunks.append(chunk_sentences)
         start = end
-    
+
     # Add final chunk
     if start < len(sentences):
         final_chunk = sentences[start:]
         if final_chunk:
             chunks.append(final_chunk)
-    
+
     # If no semantic breaks found, create reasonable sized chunks
     if not chunks and sentences:
         chunk_size = max(3, len(sentences) // 5)  # Aim for ~5 chunks minimum
         chunks = [sentences[i:i + chunk_size] for i in range(0, len(sentences), chunk_size)]
-    
+
     return chunks
 
 def enrich_chunks_with_images_semantic(chunks, image_map_path):
     """
-    Improved version - attach image information to semantically chunked content
+    Improved version - attach image information to semantically chunked content.
+    Only include image labels/files that exist in map.json, and vice versa.
     """
     import re
     from difflib import SequenceMatcher
-    
+
     try:
         with open(image_map_path, "r") as f:
             image_map = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         image_map = {}
-    
+
     def extract_image_numbers(text):
         """Extract image numbers from text"""
         patterns = [
@@ -268,45 +276,42 @@ def enrich_chunks_with_images_semantic(chunks, image_map_path):
             matches = re.findall(pattern, text, re.IGNORECASE)
             numbers.extend([int(n) for n in matches])
         return list(set(numbers))  # Remove duplicates
-    
+
     def find_best_match(image_num, image_map):
         """Find best matching image for a number"""
         best_match = None
         best_score = 0
-        
+
         for image_key, image_file in image_map.items():
-            # Extract number from image key
             key_numbers = re.findall(r"Image\s+(\d+)", image_key, re.IGNORECASE)
             if key_numbers and int(key_numbers[0]) == image_num:
-                # Calculate similarity score
                 score = 1.0
                 if best_score < score:
                     best_score = score
                     best_match = (image_key, image_file)
-        
+
         return best_match
-    
+
     enriched_chunks = []
-    
+    used_labels = set()
+    used_files = set()
+
     for chunk_idx, chunk in enumerate(chunks):
-        # Combine all text in chunk
         chunk_text = '\n'.join([s['sentence'] for s in chunk])
-        
-        # Find image numbers in text
         image_numbers = extract_image_numbers(chunk_text)
-        
-        # Match images
         image_labels = []
         image_files = []
-        
+
         for img_num in image_numbers:
             match = find_best_match(img_num, image_map)
             if match:
                 label, filename = match
-                if label not in image_labels:  # Avoid duplicates
+                if label not in image_labels and label in image_map:  # Only if label exists in map
                     image_labels.append(label)
                     image_files.append({"label": label, "file": filename})
-        
+                    used_labels.add(label)
+                    used_files.add(filename)
+
         enriched_chunks.append({
             "chunk_id": chunk_idx,
             "chunk_text": chunk_text,
@@ -315,7 +320,14 @@ def enrich_chunks_with_images_semantic(chunks, image_map_path):
             "image_files": image_files,
             "has_images": len(image_files) > 0
         })
-    
+
+    # Optionally: log or warn about orphaned labels/files
+    orphaned_labels = set(image_map.keys()) - used_labels
+    orphaned_files = set(image_map.values()) - used_files
+    if orphaned_labels or orphaned_files:
+        print(f"Orphaned image labels not used in any chunk: {orphaned_labels}")
+        print(f"Orphaned image files not used in any chunk: {orphaned_files}")
+
     return enriched_chunks
 
 def load_or_generate_enriched_chunks_semantic():
