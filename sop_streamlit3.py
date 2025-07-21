@@ -547,34 +547,16 @@ def run_main_app():
                    )
                    st.session_state.assistant_id = assistant.id
                    st.session_state.assistant_setup_complete = True
-                   st.success("✅ Assistant is ready!")
+                   st.success("✅ Assistant is ready and using the new vector store!")
+
            except Exception as e:
-               st.error(f"❌ Error setting up assistant: {str(e)}")
+               st.error(f"❌ Error during assistant setup: {str(e)}")
                st.stop()
 
        client = OpenAI(api_key=st.session_state.api_key)
        
        st.subheader("💬 Ask your question about the GTI SOP")
-       
-       # Show image suggestions if available
-       if img_map:
-           with st.expander(f"💡 Available Visual References ({len(img_map)} images)"):
-               st.write("The assistant can show relevant images for topics like:")
-               categories = []
-               for label in img_map.keys():
-                   if 'price' in label.lower() or 'discount' in label.lower():
-                       categories.append("💰 Pricing & Discounts")
-                   elif 'delivery' in label.lower() or 'date' in label.lower():
-                       categories.append("📅 Delivery & Scheduling")
-                   elif 'order' in label.lower() or 'setup' in label.lower():
-                       categories.append("📋 Order Management")
-                   elif 'total' in label.lower() or 'limit' in label.lower():
-                       categories.append("📊 Limits & Totals")
-               
-               unique_categories = list(set(categories))
-               if unique_categories:
-                   st.write(" • ".join(unique_categories))
-
+        
        # Display existing messages
        if "messages" not in st.session_state:
            st.session_state.messages = []
