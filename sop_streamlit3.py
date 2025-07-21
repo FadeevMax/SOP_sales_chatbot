@@ -350,8 +350,8 @@ def run_main_app():
         st.subheader("📄 Document Management")
         st.info("Update the SOP from the source Google Doc. This will sync the latest changes to GitHub.")
         if st.button("🔄 Check for Updates from Google Doc"):
-            with st.spinner("Syncing with Google Docs and updating GitHub... This may take a moment."):
-                success = sync_gdoc_to_github(force=True)
+            with st.spinner("Checking for updates and syncing with Google Docs... This may take a moment."):
+                success = sync_gdoc_to_github(force=False) # Changed to False
                 if success:
                     st.success("✅ SOP is now up to date with the latest from Google Doc!")
                     # Force assistant to re-setup with new file
@@ -360,8 +360,8 @@ def run_main_app():
                     st.error("❌ Update failed. Please check the application logs.")
         
         # Display local SOP info
-        if os.path.exists(PDF_CACHE_PATH):
-            last_modified_time = os.path.getmtime(PDF_CACHE_PATH)
+        if os.path.exists(DOCX_LOCAL_PATH): # Changed to check for DOCX
+            last_modified_time = os.path.getmtime(DOCX_LOCAL_PATH)
             last_modified_dt = datetime.fromtimestamp(last_modified_time)
             st.write(f"SOP last updated locally: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
             with open(PDF_CACHE_PATH, "rb") as pdf_file:
