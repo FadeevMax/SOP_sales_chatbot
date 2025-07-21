@@ -17,6 +17,22 @@ import unicodedata
 from utils.config import GDOC_STATE_PATH, GOOGLE_DOC_NAME, CACHE_DIR, PDF_CACHE_PATH, DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH, ENRICHED_CHUNKS_PATH, GITHUB_REPO, GITHUB_TOKEN
 from utils.chunking import extract_images_and_labels_from_docx
 from utils.github import update_pdf_on_github, update_docx_on_github, update_json_on_github, upload_file_to_github
+
+def get_creds():
+    """Get credentials from Streamlit secrets or local JSON file."""
+    try:
+        # Try to get from Streamlit secrets first
+        creds_dict = st.secrets["gcp_service_account"]
+        return Credentials.from_service_account_info(creds_dict)
+    except (KeyError, FileNotFoundError):
+        # If not found, try to use a local file
+        local_path = "gcp_service_account.json"
+        if os.path.exists(local_path):
+            return Credentials.from_service_account_file(local_path)
+        else:
+            st.error("GCP service account credentials not found.")
+            st.stop()
+
 def download_gdoc_as_docx(doc_id, creds, out_path):
    drive_service = build('drive', 'v3', credentials=creds)
    request = drive_service.files().export_media(fileId=doc_id, mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
@@ -57,9 +73,7 @@ def get_live_sop_pdf_path(doc_name: str) -> str:
         if not os.path.exists(CACHE_DIR):
             os.makedirs(CACHE_DIR)
 
-        scopes = ['https://www.googleapis.com/auth/drive.readonly']
-        creds_dict = st.secrets["gcp_service_account"]
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        creds = get_creds()
         drive_service = build('drive', 'v3', credentials=creds)
 
         query = f"name='{doc_name}' and mimeType='application/vnd.google-apps.document'"
@@ -112,9 +126,7 @@ def sync_gdoc_to_github(force=False):
     last_checked_dt = datetime.fromisoformat(last_synced) if last_synced else None
 
     # Google API Auth
-    scopes = ['https://www.googleapis.com/auth/drive.readonly']
-    creds_dict = st.secrets["gcp_service_account"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    creds = get_creds()
     doc_id, modified_time = get_gdoc_last_modified(creds, GOOGLE_DOC_NAME)
     if not doc_id or not modified_time:
         st.warning("Google Doc not found or can't fetch modified time.")

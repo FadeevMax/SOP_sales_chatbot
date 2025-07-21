@@ -31,6 +31,7 @@ from utils.state import (
     save_app_state,
     load_app_state
 )
+from utils.gdoc import sync_gdoc_to_github
 
 import streamlit as st
 from openai import OpenAI
@@ -257,6 +258,17 @@ def initialize_session_state():
 # --- Main Application Function ---
 # ======================================================================
 def run_main_app():
+    # One-time setup: If the main SOP document doesn't exist, download it.
+    if not os.path.exists(PDF_CACHE_PATH):
+        with st.spinner("Performing first-time setup. Downloading SOP documents from the source..."):
+            success = sync_gdoc_to_github(force=True)
+            if success:
+                st.success("✅ First-time setup complete! The latest SOP has been downloaded.")
+                st.rerun()
+            else:
+                st.error("❌ Critical Error: Could not download the SOP documents. The app cannot continue. Please check the logs.")
+                st.stop()
+    
     st.sidebar.title("🔧 Navigation")
     st.sidebar.info(f"User ID: {st.session_state.user_id[:8]}...")
     page = st.sidebar.radio("Go to:", ["🤖 Chatbot", "📄 Instructions", "⚙️ Settings"])
