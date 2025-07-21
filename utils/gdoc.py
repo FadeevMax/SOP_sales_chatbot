@@ -15,8 +15,123 @@ import requests
 import base64
 import unicodedata
 from utils.config import GDOC_STATE_PATH, GOOGLE_DOC_NAME, CACHE_DIR, PDF_CACHE_PATH, DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH, ENRICHED_CHUNKS_PATH, GITHUB_REPO, GITHUB_TOKEN
-from utils.chunking import extract_images_and_labels_from_docx
+import re
+from docx import Document
+from docx.oxml.table import CT_Tbl
+from docx.oxml.text.paragraph import CT_P
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+from docx.oxml.ns import qn
 from utils.github import update_pdf_on_github, update_docx_on_github, update_json_on_github, upload_file_to_github
+
+caption_pattern = re.compile(r"^Image\s+(\d+):?\s*(.*)", re.IGNORECASE)
+
+def clean_caption(text):
+    cleaned = unicodedata.normalize('NFKC', text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = cleaned.replace("–", "-").replace("—", "-").replace(""", '"').replace(""", '"')
+    cleaned = cleaned.replace("'", "'").replace("'", "'")
+    return cleaned
+
+def extract_label(text):
+    text = clean_caption(text)
+    m = caption_pattern.match(text)
+    if m:
+        idx = int(m.group(1))
+        desc = m.group(2).strip().rstrip(".")
+        return f"Image {idx}: {desc}" if desc else f"Image {idx}"
+    return None
+
+def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_output_path, debug=False):
+    """Extract images and their labels from a DOCX file"""
+    os.makedirs(image_output_dir, exist_ok=True)
+    doc = Document(docx_path)
+    image_map = {}
+    items = []
+    
+    # Collect all blocks in order
+    body = doc.element.body
+    for child in body.iterchildren():
+        if isinstance(child, CT_P):
+            para = Paragraph(child, doc)
+            # Check for images in paragraph
+            has_image = False
+            for run in para.runs:
+                if 'graphic' in run._element.xml:
+                    for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
+                        for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
+                            rel_id = blip.get(qn('r:embed'))
+                            if rel_id and rel_id in doc.part.related_parts:
+                                image_part = doc.part.related_parts[rel_id]
+                                items.append(('image', image_part))
+                                has_image = True
+            
+            # Add text if it exists
+            if para.text.strip():
+                items.append(('text', para.text.strip()))
+                
+        elif isinstance(child, CT_Tbl):
+            table = Table(child, doc)
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        # Check for images in table cells
+                        for run in para.runs:
+                            if 'graphic' in run._element.xml:
+                                for drawing in run._element.findall(".//w:drawing", namespaces=run._element.nsmap):
+                                    for blip in drawing.findall(".//a:blip", namespaces=run._element.nsmap):
+                                        rel_id = blip.get(qn('r:embed'))
+                                        if rel_id and rel_id in doc.part.related_parts:
+                                            image_part = doc.part.related_parts[rel_id]
+                                            items.append(('image', image_part))
+                        
+                        if para.text.strip():
+                            items.append(('text', para.text.strip()))
+
+    # Associate images with their following captions
+    image_counter = 1
+    i = 0
+    while i < len(items):
+        if items[i][0] == 'image':
+            image_part = items[i][1]
+            
+            # Look for the next text that might be a caption
+            label = None
+            for j in range(i + 1, min(i + 3, len(items))):  # Look ahead up to 2 items
+                if items[j][0] == 'text':
+                    potential_label = extract_label(items[j][1])
+                    if potential_label:
+                        label = potential_label
+                        break
+            
+            if not label:
+                label = f"Image {image_counter}"
+            
+            # Save image file
+            image_extension = image_part.content_type.split('/')[-1]
+            if image_extension == 'jpeg':
+                image_extension = 'jpg'
+            image_name = f"image_{image_counter}.{image_extension}"
+            image_path = os.path.join(image_output_dir, image_name)
+            
+            with open(image_path, "wb") as f:
+                f.write(image_part.blob)
+            
+            image_map[label] = image_name
+            image_counter += 1
+            
+        i += 1
+
+    # Save mapping
+    with open(mapping_output_path, "w") as f:
+        json.dump(image_map, f, indent=2)
+    
+    if debug:
+        print("Final image_map:")
+        for caption, img in image_map.items():
+            print(f"{caption} => {img}")
+    
+    return image_map
 
 def get_creds():
     """Get credentials from Streamlit secrets or local JSON file."""

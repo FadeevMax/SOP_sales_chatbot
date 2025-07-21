@@ -1,12 +1,4 @@
 
-from utils.chunking import (
-    load_or_generate_enriched_chunks_semantic,  # Changed
-    semantic_chunking_docx,                     # Changed
-    enrich_chunks_with_images_semantic,         # Changed
-    extract_images_and_labels_from_docx,        # Same
-    analyze_chunks                              # New function (optional)
-)
-
 from utils.github import (
     upload_file_to_github,
     update_docx_on_github,
@@ -387,23 +379,28 @@ def run_main_app():
     elif page == "🤖 Chatbot":
        st.title("🤖 GTI SOP Sales Coordinator")
 
-       # Simplified assistant setup
+       # Simplified assistant setup using OpenAI's vector store
        if not st.session_state.get('assistant_setup_complete', False):
            try:
-               if not os.path.exists(PDF_CACHE_PATH):
-                   st.warning("SOP document not found. Please go to Settings to fetch it.")
+               # Ensure the source document (DOCX) exists
+               if not os.path.exists(DOCX_LOCAL_PATH):
+                   st.warning("SOP document not found. Please go to the Settings page to sync it from Google Docs.")
                    st.stop()
                
-               st.session_state.file_path = PDF_CACHE_PATH
-               with st.spinner("Setting up AI assistant with the latest data..."):
+               st.session_state.file_path = DOCX_LOCAL_PATH # Use DOCX for vectorizing
+               with st.spinner("Setting up the AI assistant with the latest SOP document..."):
                    client = OpenAI(api_key=st.session_state.api_key)
                    
-                   # Use a single, persistent thread
+                   # Use a single, persistent thread for the user
                    if "thread_id" not in st.session_state:
                        thread = client.beta.threads.create()
                        st.session_state.thread_id = thread.id
 
-                   file_response = client.files.create(file=open(st.session_state.file_path, "rb"), purpose="assistants")
+                   # Step 1: Upload the file to OpenAI
+                   file_response = client.files.create(
+                       file=open(st.session_state.file_path, "rb"), 
+                       purpose="assistants"
+                   )
                    file_id = file_response.id
 
                    vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
