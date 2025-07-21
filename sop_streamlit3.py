@@ -477,14 +477,14 @@ def run_main_app():
             last_modified_dt = datetime.fromtimestamp(last_modified_time)
             st.write(f"SOP last updated locally: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
             
-            # Show available images
+            # Show available images (expander only in settings)
             img_map = load_map_from_github()
             if img_map:
                 st.write(f"**Available Images:** {len(img_map)} images loaded")
-                with st.expander("View Available Images"):
+                with st.expander("💡 Available Visual References ({} images)".format(len(img_map))):
                     for label, filename in img_map.items():
                         st.write(f"• {label} → {filename}")
-            
+
             with open(PDF_CACHE_PATH, "rb") as pdf_file:
                 st.download_button(
                     label="⬇️ Download Local SOP as PDF",
