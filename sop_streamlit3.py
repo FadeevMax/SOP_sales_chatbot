@@ -545,7 +545,7 @@ initialize_session_state()
 
 # Ensure enriched_chunks.json exists at startup
 if not os.path.exists(ENRICHED_CHUNKS_PATH):
-    load_or_generate_enriched_chunks()
+    load_or_generate_enriched_chunks_semantic()
 
 if not st.session_state.get("authenticated", False):
     st.title("🔐 GTI SOP Sales Coordinator Login")
