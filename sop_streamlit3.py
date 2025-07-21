@@ -500,9 +500,9 @@ def run_main_app():
     elif page == "🤖 Chatbot":
        st.title("🤖 GTI SOP Sales Coordinator")
 
-       # Load image map for context
+       # Load image map for context (do not show any expander or image info here)
        img_map = load_map_from_github()
- 
+
        # Simplified assistant setup using OpenAI's vector store
        if not st.session_state.get('assistant_setup_complete', False):
            try:
@@ -566,9 +566,7 @@ def run_main_app():
                st.markdown(msg["content"])
                # Also check for images in historical messages
                if msg["role"] == "assistant":
-                    img_map = load_map_from_github()
-                    if img_map:
-                        maybe_show_referenced_images(msg["content"], img_map, GITHUB_REPO)
+                    maybe_show_referenced_images(msg["content"], img_map, GITHUB_REPO)
 
        # Chat input
        if user_input := st.chat_input("Ask your question here..."):
