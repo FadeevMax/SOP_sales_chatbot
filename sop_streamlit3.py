@@ -14,7 +14,8 @@ from utils.gdoc import (
     get_live_sop_pdf_path,
     get_last_gdoc_synced_time,
     set_last_gdoc_synced_time,
-    sync_gdoc_to_github
+    sync_gdoc_to_github,
+    force_resync_to_github
 )
 
 from utils.state import (
@@ -348,19 +349,38 @@ def run_main_app():
         
         # Document Sync
         st.subheader("📄 Document Management")
-        st.info("Update the SOP from the source Google Doc. This will sync the latest changes to GitHub.")
-        if st.button("🔄 Check for Updates from Google Doc"):
-            with st.spinner("Checking for updates and syncing with Google Docs... This may take a moment."):
-                success = sync_gdoc_to_github(force=False) # Changed to False
-                if success:
-                    st.success("✅ SOP is now up to date with the latest from Google Doc!")
-                    # Force assistant to re-setup with new file
-                    st.session_state.assistant_setup_complete = False
-                else:
-                    st.error("❌ Update failed. Please check the application logs.")
+        st.info("Use the buttons below to manage the SOP document.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("🔄 Check for Google Doc Updates", help="Checks if the source Google Doc has been updated and downloads it if needed."):
+                with st.spinner("Checking for updates and syncing with Google Docs..."):
+                    success = sync_gdoc_to_github(force=False)
+                    if success:
+                        st.success("✅ SOP is now up to date!")
+                        st.session_state.assistant_setup_complete = False
+                        st.rerun() # Rerun to reflect changes immediately
+                    else:
+                        st.error("❌ Update failed. Check logs for details.")
+        
+        with col2:
+            if st.button("🛠️ Re-sync Local Files to GitHub", help="Forces a re-upload of local DOCX, images, and map.json to GitHub."):
+                with st.spinner("Re-syncing local files to GitHub..."):
+                    if not os.path.exists(DOCX_LOCAL_PATH):
+                        st.error("Local sop.docx not found. Please 'Check for Google Doc Updates' first.")
+                    else:
+                        # This function will need to be created/adjusted
+                        # For now, we can call the main sync but with a special flag or separate logic
+                        force_resync_to_github() 
+                        st.success("✅ Local files re-synced to GitHub!")
+                        st.session_state.assistant_setup_complete = False
+                        st.rerun()
+
+        st.markdown("---")
         
         # Display local SOP info
-        if os.path.exists(DOCX_LOCAL_PATH): # Changed to check for DOCX
+        if os.path.exists(DOCX_LOCAL_PATH):
             last_modified_time = os.path.getmtime(DOCX_LOCAL_PATH)
             last_modified_dt = datetime.fromtimestamp(last_modified_time)
             st.write(f"SOP last updated locally: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")

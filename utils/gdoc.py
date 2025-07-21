@@ -133,6 +133,57 @@ def extract_images_and_labels_from_docx(docx_path, image_output_dir, mapping_out
     
     return image_map
 
+def force_resync_to_github():
+    """
+    Forces the re-processing of the local DOCX file and syncs all assets to GitHub.
+    This skips the Google Doc check and works with the current local DOCX.
+    """
+    if not os.path.exists(DOCX_LOCAL_PATH):
+        st.error("Cannot re-sync: The local DOCX file does not exist.")
+        return False
+
+    try:
+        # Step 1: Re-extract images and create map.json from the local DOCX
+        st.write("Extracting images and labels from local DOCX...")
+        extract_images_and_labels_from_docx(DOCX_LOCAL_PATH, IMAGE_DIR, IMAGE_MAP_PATH, debug=True)
+        st.write("✅ Image extraction complete.")
+
+        # Step 2: Upload map.json to GitHub
+        st.write("Uploading map.json to GitHub...")
+        update_json_on_github(
+            local_json_path=IMAGE_MAP_PATH,
+            repo_json_path="map.json",
+            commit_message="Manual Re-sync: Update map.json",
+            github_repo=GITHUB_REPO,
+            github_token=GITHUB_TOKEN
+        )
+        st.write("✅ map.json uploaded.")
+
+        # Step 3: Upload all images from the local image directory
+        st.write("Uploading images to GitHub...")
+        for file in os.listdir(IMAGE_DIR):
+            local_path = os.path.join(IMAGE_DIR, file)
+            github_path = f"images/{file}"
+            upload_file_to_github(
+                local_path=local_path,
+                github_path=github_path,
+                commit_message=f"Manual Re-sync: Update {file}"
+            )
+        st.write("✅ Images uploaded.")
+
+        # Step 4: Upload the DOCX and PDF files
+        st.write("Uploading DOCX and PDF to GitHub...")
+        update_docx_on_github(DOCX_LOCAL_PATH)
+        if os.path.exists(PDF_CACHE_PATH):
+             update_pdf_on_github(PDF_CACHE_PATH)
+        st.write("✅ Document files uploaded.")
+
+        return True
+
+    except Exception as e:
+        st.error(f"An error occurred during the re-sync process: {e}")
+        return False
+        
 def get_creds():
     """Get credentials from Streamlit secrets or local JSON file."""
     try:
