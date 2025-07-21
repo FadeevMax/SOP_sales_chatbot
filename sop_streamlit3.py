@@ -502,7 +502,7 @@ def run_main_app():
 
        # Load image map for context
        img_map = load_map_from_github()
-
+ 
        # Simplified assistant setup using OpenAI's vector store
        if not st.session_state.get('assistant_setup_complete', False):
            try:
@@ -556,7 +556,7 @@ def run_main_app():
        client = OpenAI(api_key=st.session_state.api_key)
        
        st.subheader("💬 Ask your question about the GTI SOP")
-        
+
        # Display existing messages
        if "messages" not in st.session_state:
            st.session_state.messages = []
@@ -564,52 +564,44 @@ def run_main_app():
        for msg in st.session_state.messages:
            with st.chat_message(msg["role"]):
                st.markdown(msg["content"])
+               # Also check for images in historical messages
+               if msg["role"] == "assistant":
+                    img_map = load_map_from_github()
+                    if img_map:
+                        maybe_show_referenced_images(msg["content"], img_map, GITHUB_REPO)
 
        # Chat input
-       user_input = st.chat_input("Ask your question here...")
-
-       if user_input:
+       if user_input := st.chat_input("Ask your question here..."):
            try:
                st.session_state.messages.append({"role": "user", "content": user_input})
                with st.chat_message("user"):
                    st.markdown(user_input)
 
-               # Get image suggestions based on the question
-               suggested_images = get_image_suggestions(user_input, img_map)
-               
-               # Enhance the user message with image context if relevant
-               enhanced_user_input = user_input
-               if suggested_images:
-                   enhanced_user_input += f"\n\nNote: Consider referencing these potentially relevant images in your response: {', '.join(suggested_images[:3])}"
-
                client.beta.threads.messages.create(
                    thread_id=st.session_state.thread_id,
                    role="user",
-                   content=enhanced_user_input
+                   content=user_input
                )
 
-               run = client.beta.threads.runs.create_and_poll(
-                   thread_id=st.session_state.thread_id,
-                   assistant_id=st.session_state.assistant_id
-               )
+               # Run the assistant and poll for completion
+               with st.spinner("Thinking..."):
+                   run = client.beta.threads.runs.create_and_poll(
+                       thread_id=st.session_state.thread_id,
+                       assistant_id=st.session_state.assistant_id
+                   )
 
                if run.status == 'completed':
-                   messages = client.beta.threads.messages.list(thread_id=st.session_state.thread_id)
-                   assistant_reply = next(
-                       (m.content[0].text.value for m in messages.data if m.role == "assistant"),
-                       "Sorry, I couldn't get a response."
-                   )
+                   messages = client.beta.threads.messages.list(thread_id=st.session_state.thread_id, order="desc", limit=1)
+                   assistant_reply = messages.data[0].content[0].text.value
+
                    st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
-                   with st.chat_message("assistant"):
-                       st.markdown(assistant_reply)
-                       # Enhanced image display logic
-                       maybe_show_referenced_images(assistant_reply, img_map, GITHUB_REPO)
+                   st.rerun()
+
                else:
-                   st.error(f"❌ Run failed with status: {run.status}")
+                   st.error(f"❌ The run failed with status: {run.status}")
 
            except Exception as e:
-               st.error(f"❌ Error processing your request: {str(e)}")
-               # Reset assistant on error to allow for a clean restart
+               st.error(f"❌ An error occurred while processing your request: {str(e)}")
                st.session_state.assistant_setup_complete = False
 
 # ======================================================================
