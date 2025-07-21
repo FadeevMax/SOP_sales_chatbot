@@ -416,8 +416,8 @@ def run_main_app():
 
         # Model Selection
         st.subheader("🤖 Model Selection")
-        models = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"]  # Added gpt-4.1
-        current_model = st.session_state.get("model", "gpt-4o")
+        models = ["gpt-4.1", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]  # Added gpt-4.1
+        current_model = st.session_state.get("model", "gpt-4.1")
         # Handle case where current model might not be in the new list
         try:
             model_index = models.index(current_model)
