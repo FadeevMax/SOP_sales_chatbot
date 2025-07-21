@@ -1,4 +1,3 @@
-
 from utils.github import (
     upload_file_to_github,
     update_docx_on_github,
@@ -42,6 +41,7 @@ import io # Needed for handling the in-memory file download
 import requests
 import base64
 import unicodedata
+import re
 
 DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
 
@@ -101,66 +101,25 @@ Your answers must be formatted like a top-tier, helpful Reddit post. Use clear h
 * **Tables:** Use Markdown tables to present structured data, like pricing tiers or contact lists, whenever appropriate.
 
 ---
-# Example Implementations
+# CRITICAL: Image Reference Instructions
 ---
-**User Question Example 1:** "NV orders - batteries on the same order or not?"
+ALWAYS look for relevant images when answering questions. Available images include:
+- Pricing and discount information
+- Order setup and delivery dates
+- Special deals and promotions
+- Process workflows
+- State-specific requirements
 
+When your answer relates to visual information like pricing, discounts, order setup, delivery scheduling, or special deals, you MUST reference the appropriate image by including the EXACT label from the document.
 
-**Your Ideal Response:**
-## ⚠️ Batteries Must Be on a Separate Order for Nevada (NV) Rise Orders
+For example:
+- For pricing questions: "Image 1: . Actual price column"
+- For discount questions: "Image 1: . Special discounts they are running" or "Image 2: . Special deals"
+- For order setup: "Image 3: . Delivery date set up"
+- For daily limits: "Image 2: . Total dollar and unit amount per store/day"
 
-### 📋 Note from Airion Quillin, Sales Rep @ GTI
-*Separate order would be best, just to make sure it gets called out for an invoice considering batteries don't show up on the manifest or transfer.*
-
----
-**User Question Example 2:** "NJ orders - do we split orders"
-
-
-**Your Ideal Response:**
-## ⚠️ New Jersey orders require splitting under certain conditions
-
-### 🔄 Batteries MUST go on a separate invoice.
-
-### 📋 Unit total daily limit:
-- The maximum total per order is 4,000 units. If there are more than 4,000 items, the order MUST BE SPLIT. The second order will be scheduled for the next day.
-	- **Units total per day**: 4,000 units per store. For example, if we have an order for 1,500 units of edibles, another for 200 units of concentrates, and a third for 1,000 units of prerolls (that totals 2,700 units), that means we have 1,300 units of available space left for that delivery date. We should follow these daily limits whenever instructed to do so.
-### ⚖️ Line item rule for large orders: If an order has more than 50 line items, it must be split accordingly.
-
----
-### 💡 Example: A RISE order with 150 lines should be split into 3 orders of 50 lines each.
-
-- **Sample order**: If a request for samples is received (rare), they should be placed as a new order.
-- **Two menu formats**: If an NJ order email includes two Excel menus for the same store, combine them into one order in LT.
-- **Notes format**:
-	- 0/30 Animal Face 3.5g Rythm  
-	- 25/50 Brownie Scout 7g Rythm
-
----
-**User Question Example 3:** "IL orders - whats the order limit"
-
-
-**Your Ideal Response:**
-
-## 📋 For regular orders
- 
-- No set unit/dollar limit. Don't break cases.
-- Batteries MUST go on separate invoices!
-
---- 
-## 📋 For RISE stores
-
-- If the order is above 150k or has more than 8k units, you need to split the order equally.
-
----
-### 💡 **Best Practices & Reminders:**
-
-| Limit Type        | Rule                                                |
-| ----------------- | --------------------------------------------------- |
-| General Stores    | No set unit/dollar limit. Don't break cases.        |
-| Rise Dispensaries | 8,000 units **or** $150,000 per order (must split). |
-| Batteries         | Always separate order for batteries.                |
 IMPORTANT:
-When answering questions, if a labeled screenshot or image would help illustrate your response, refer to it by its full caption as seen in the SOP (for example: Image 2: . Total dollar and unit amount per store / day).
+When answering questions, if a labeled screenshot or image would help illustrate your response, refer to it by its full caption as seen in the SOP.
 Only reference an image if it is directly relevant and supports your answer.
 Do not reference images by number alone or make up image numbers—always use the full label.
 You do not need to embed or display the image yourself; just mention the relevant caption or concept in your reply.
@@ -170,6 +129,8 @@ When referencing an image, you must copy and paste the full label exactly as it 
 For example, if the SOP has a label "Image 3: . Product split between case and loose units (for requested 300+ units)", your answer must include that exact phrase.
 Never paraphrase or summarize image labels.
 Only answers that mention the full caption, exactly, will show the related image to the user.
+
+ALWAYS try to include relevant images in your responses - users find visual aids extremely helpful for understanding procedures.
 """
 
 from utils.config import (
@@ -187,18 +148,139 @@ from utils.config import (
     ENRICHED_CHUNKS_PATH,
 )
 
+def get_image_suggestions(question_text, img_map):
+    """
+    Analyze the question and suggest relevant images based on keywords
+    """
+    question_lower = question_text.lower()
+    suggestions = []
+    
+    # Define keyword mappings to image concepts
+    keyword_mappings = {
+        'price': ['price', 'pricing', 'cost', 'dollar'],
+        'discount': ['discount', 'deal', 'special', 'promotion'],
+        'delivery': ['delivery', 'schedule', 'date', 'when'],
+        'order': ['order', 'setup', 'process'],
+        'limit': ['limit', 'maximum', 'total', 'amount'],
+        'split': ['split', 'separate', 'divide'],
+        'unit': ['unit', 'quantity', 'amount'],
+        'battery': ['battery', 'batteries'],
+        'invoice': ['invoice', 'billing'],
+        'state': ['state', 'nj', 'ny', 'il', 'oh', 'md', 'nv', 'ma']
+    }
+    
+    # Find matching keywords
+    matched_concepts = []
+    for concept, keywords in keyword_mappings.items():
+        if any(keyword in question_lower for keyword in keywords):
+            matched_concepts.append(concept)
+    
+    # Match concepts to available images
+    for label in img_map.keys():
+        label_lower = label.lower()
+        for concept in matched_concepts:
+            if concept in label_lower:
+                suggestions.append(label)
+                break
+    
+    return suggestions
+
 def maybe_show_referenced_images(answer_text, img_map, github_repo):
     import streamlit as st
 
     shown = set()
+    
+    # First, show images that are explicitly referenced in the answer
     for label in img_map.keys():
-        # If the exact label is in the answer text (case-insensitive)
         if label.lower() in answer_text.lower() and label not in shown:
             url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_map[label]}"
             st.image(url, caption=label)
             shown.add(label)
+    
+    # If no images were shown, try to show contextually relevant ones
+    if not shown:
+        # Look for key terms that might indicate relevant images
+        answer_lower = answer_text.lower()
+        relevant_images = []
+        
+        # Priority matching for common concepts
+        if any(term in answer_lower for term in ['price', 'pricing', 'cost', 'dollar']):
+            for label in img_map.keys():
+                if 'price' in label.lower():
+                    relevant_images.append(label)
+        
+        if any(term in answer_lower for term in ['discount', 'deal', 'special']):
+            for label in img_map.keys():
+                if any(term in label.lower() for term in ['discount', 'deal', 'special']):
+                    relevant_images.append(label)
+        
+        if any(term in answer_lower for term in ['delivery', 'date', 'schedule']):
+            for label in img_map.keys():
+                if 'delivery' in label.lower() or 'date' in label.lower():
+                    relevant_images.append(label)
+        
+        if any(term in answer_lower for term in ['total', 'limit', 'amount']):
+            for label in img_map.keys():
+                if 'total' in label.lower() or 'amount' in label.lower():
+                    relevant_images.append(label)
+        
+        # Show up to 2 most relevant images
+        for label in relevant_images[:2]:
+            if label not in shown:
+                url = f"https://raw.githubusercontent.com/{github_repo}/main/images/{img_map[label]}"
+                st.image(url, caption=f"Related: {label}")
+                shown.add(label)
 
+def enhance_assistant_with_image_context(instructions, img_map):
+    """
+    Enhance the assistant instructions with available image information
+    """
+    if not img_map:
+        return instructions
+    
+    image_list = "\n".join([f"- {label}" for label in img_map.keys()])
+    
+    enhanced_instructions = instructions + f"""
 
+---
+# Available Images for Reference
+---
+The following images are available in the SOP document. When answering questions, reference these images by their EXACT labels when relevant:
+
+{image_list}
+
+Remember: Always include the full label exactly as written above when referencing an image. This ensures the image will be displayed to the user.
+"""
+    
+    return enhanced_instructions
+
+def update_map_json_only():
+    """
+    Update only the map.json file on GitHub from local version
+    """
+    try:
+        if not os.path.exists(IMAGE_MAP_PATH):
+            st.error("Local map.json not found. Please sync from Google Docs first.")
+            return False
+        
+        success = update_json_on_github(
+            local_json_path=IMAGE_MAP_PATH,
+            repo_json_path="map.json",
+            commit_message="Update map.json only",
+            github_repo=GITHUB_REPO,
+            github_token=GITHUB_TOKEN
+        )
+        
+        if success:
+            st.success("✅ map.json updated successfully on GitHub!")
+            return True
+        else:
+            st.error("❌ Failed to update map.json on GitHub.")
+            return False
+            
+    except Exception as e:
+        st.error(f"Error updating map.json: {str(e)}")
+        return False
 
 def update_pdf_on_github(local_pdf_path):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_PDF_NAME}"
@@ -216,9 +298,6 @@ def update_pdf_on_github(local_pdf_path):
     }
     resp = requests.put(url, headers=headers, json=data)
     return resp.status_code in [200, 201]
-
-
-
 
 # --- Session State Initialization Function ---
 def initialize_session_state():
@@ -337,9 +416,16 @@ def run_main_app():
 
         # Model Selection
         st.subheader("🤖 Model Selection")
-        models = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
+        models = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1"]  # Added gpt-4.1
         current_model = st.session_state.get("model", "gpt-4o")
-        new_model = st.selectbox("Choose a model for the chatbot:", models, index=models.index(current_model))
+        # Handle case where current model might not be in the new list
+        try:
+            model_index = models.index(current_model)
+        except ValueError:
+            model_index = 0
+            st.session_state.model = models[0]
+        
+        new_model = st.selectbox("Choose a model for the chatbot:", models, index=model_index)
         if new_model != current_model:
             st.session_state.model = new_model
             st.session_state.assistant_setup_complete = False # Force re-setup
@@ -351,7 +437,7 @@ def run_main_app():
         st.subheader("📄 Document Management")
         st.info("Use the buttons below to manage the SOP document.")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)  # Changed to 3 columns
 
         with col1:
             if st.button("🔄 Check for Google Doc Updates", help="Checks if the source Google Doc has been updated and downloads it if needed."):
@@ -370,10 +456,16 @@ def run_main_app():
                     if not os.path.exists(DOCX_LOCAL_PATH):
                         st.error("Local sop.docx not found. Please 'Check for Google Doc Updates' first.")
                     else:
-                        # This function will need to be created/adjusted
-                        # For now, we can call the main sync but with a special flag or separate logic
                         force_resync_to_github() 
                         st.success("✅ Local files re-synced to GitHub!")
+                        st.session_state.assistant_setup_complete = False
+                        st.rerun()
+
+        with col3:  # New button for map.json only update
+            if st.button("🗺️ Update Map.json Only", help="Updates only the map.json file on GitHub from local version."):
+                with st.spinner("Updating map.json on GitHub..."):
+                    success = update_map_json_only()
+                    if success:
                         st.session_state.assistant_setup_complete = False
                         st.rerun()
 
@@ -384,6 +476,15 @@ def run_main_app():
             last_modified_time = os.path.getmtime(DOCX_LOCAL_PATH)
             last_modified_dt = datetime.fromtimestamp(last_modified_time)
             st.write(f"SOP last updated locally: **{last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')}**")
+            
+            # Show available images
+            img_map = load_map_from_github()
+            if img_map:
+                st.write(f"**Available Images:** {len(img_map)} images loaded")
+                with st.expander("View Available Images"):
+                    for label, filename in img_map.items():
+                        st.write(f"• {label} → {filename}")
+            
             with open(PDF_CACHE_PATH, "rb") as pdf_file:
                 st.download_button(
                     label="⬇️ Download Local SOP as PDF",
@@ -398,6 +499,9 @@ def run_main_app():
 
     elif page == "🤖 Chatbot":
        st.title("🤖 GTI SOP Sales Coordinator")
+
+       # Load image map for context
+       img_map = load_map_from_github()
 
        # Simplified assistant setup using OpenAI's vector store
        if not st.session_state.get('assistant_setup_complete', False):
@@ -428,9 +532,15 @@ def run_main_app():
                        vector_store_id=vector_store.id, file_ids=[file_id]
                    )
 
+                   # Enhanced instructions with image context
+                   enhanced_instructions = enhance_assistant_with_image_context(
+                       st.session_state.get("instructions", DEFAULT_INSTRUCTIONS), 
+                       img_map
+                   )
+
                    assistant = client.beta.assistants.create(
                        name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
-                       instructions=st.session_state.get("instructions", DEFAULT_INSTRUCTIONS),
+                       instructions=enhanced_instructions,
                        model=st.session_state.get("model", "gpt-4o"),
                        tools=[{"type": "file_search"}],
                        tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}}
@@ -445,6 +555,25 @@ def run_main_app():
        client = OpenAI(api_key=st.session_state.api_key)
        
        st.subheader("💬 Ask your question about the GTI SOP")
+       
+       # Show image suggestions if available
+       if img_map:
+           with st.expander(f"💡 Available Visual References ({len(img_map)} images)"):
+               st.write("The assistant can show relevant images for topics like:")
+               categories = []
+               for label in img_map.keys():
+                   if 'price' in label.lower() or 'discount' in label.lower():
+                       categories.append("💰 Pricing & Discounts")
+                   elif 'delivery' in label.lower() or 'date' in label.lower():
+                       categories.append("📅 Delivery & Scheduling")
+                   elif 'order' in label.lower() or 'setup' in label.lower():
+                       categories.append("📋 Order Management")
+                   elif 'total' in label.lower() or 'limit' in label.lower():
+                       categories.append("📊 Limits & Totals")
+               
+               unique_categories = list(set(categories))
+               if unique_categories:
+                   st.write(" • ".join(unique_categories))
 
        # Display existing messages
        if "messages" not in st.session_state:
@@ -463,10 +592,18 @@ def run_main_app():
                with st.chat_message("user"):
                    st.markdown(user_input)
 
+               # Get image suggestions based on the question
+               suggested_images = get_image_suggestions(user_input, img_map)
+               
+               # Enhance the user message with image context if relevant
+               enhanced_user_input = user_input
+               if suggested_images:
+                   enhanced_user_input += f"\n\nNote: Consider referencing these potentially relevant images in your response: {', '.join(suggested_images[:3])}"
+
                client.beta.threads.messages.create(
                    thread_id=st.session_state.thread_id,
                    role="user",
-                   content=user_input
+                   content=enhanced_user_input
                )
 
                run = client.beta.threads.runs.create_and_poll(
@@ -483,7 +620,7 @@ def run_main_app():
                    st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
                    with st.chat_message("assistant"):
                        st.markdown(assistant_reply)
-                       img_map = load_map_from_github()
+                       # Enhanced image display logic
                        maybe_show_referenced_images(assistant_reply, img_map, GITHUB_REPO)
                else:
                    st.error(f"❌ Run failed with status: {run.status}")
