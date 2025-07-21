@@ -541,7 +541,7 @@ def run_main_app():
                    assistant = client.beta.assistants.create(
                        name=f"SOP Sales Coordinator - {st.session_state.user_id[:8]}",
                        instructions=enhanced_instructions,
-                       model=st.session_state.get("model", "gpt-4o"),
+                       model=st.session_state.get("model", "gpt-4.1"),
                        tools=[{"type": "file_search"}],
                        tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}}
                    )
