@@ -155,6 +155,17 @@ VECTOR_STORE_NAME = "KnowledgeBaseStore"
 DOC_URL = "https://raw.githubusercontent.com/FadeevMax/SOP_sales_chatbot/main/Live_GTI_SOP.docx"
 LAST_HASH_PATH = "last_doc_hash.txt"
 
+BASE_IMAGE_URL = "https://raw.githubusercontent.com/FadeevMax/SOP_sales_chatbot/main/images/"
+import re
+
+def insert_image_links(answer_text: str) -> str:
+    # Replace any occurrences of image file names with Markdown image syntax
+    def replace_match(match):
+        filename = match.group(1)
+        return f"![]({BASE_IMAGE_URL}{filename})"
+    # This regex finds substrings that look like image filenames (png/jpg/gif)
+    return re.sub(r'\b([\w\-\_]+\.(?:png|jpg|jpeg|gif))\b', replace_match, answer_text)
+
 # --- Persistent Vector Store Setup ---
 def get_or_create_vector_store(client):
     vector_stores = client.vector_stores.list()
@@ -652,8 +663,8 @@ def run_main_app():
                if run.status == 'completed':
                    messages = client.beta.threads.messages.list(thread_id=st.session_state.thread_id, order="desc", limit=1)
                    assistant_reply = messages.data[0].content[0].text.value
-
-                   st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
+                   formatted_answer = insert_image_links(assistant_reply)
+                   st.markdown(formatted_answer)
                    st.rerun()
 
                else:
