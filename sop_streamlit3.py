@@ -42,6 +42,9 @@ import requests
 import base64
 import unicodedata
 import re
+import threading
+import hashlib
+from io import BytesIO
 
 DEFAULT_INSTRUCTIONS = """You are the **AI Sales Order Entry Coordinator**, an expert on Green Thumb Industries (GTI) sales operations. Your sole purpose is to support the human Sales Ops team by providing fast and accurate answers to their questions about order entry rules and procedures.
 
@@ -147,6 +150,64 @@ from utils.config import (
     IMAGE_MAP_PATH,
     ENRICHED_CHUNKS_PATH,
 )
+
+VECTOR_STORE_NAME = "KnowledgeBaseStore"
+DOC_URL = "https://raw.githubusercontent.com/FadeevMax/SOP_sales_chatbot/main/Live_GTI_SOP.docx"
+LAST_HASH_PATH = "last_doc_hash.txt"
+
+# --- Persistent Vector Store Setup ---
+def get_or_create_vector_store(client):
+    vector_stores = client.vector_stores.list()
+    for store in vector_stores.data:
+        if store.name == VECTOR_STORE_NAME:
+            return store
+    # Not found, create it
+    return client.vector_stores.create(name=VECTOR_STORE_NAME)
+
+# --- Daily Refresh Routine ---
+def refresh_knowledge_base():
+    client = OpenAI(api_key=st.session_state.api_key)
+    vector_store = get_or_create_vector_store(client)
+    # 1. Download the latest document from GitHub
+    response = requests.get(DOC_URL)
+    if response.status_code != 200:
+        print(f"Failed to download document, status {response.status_code}")
+        return
+    new_content = response.content
+    # 2. Check if content has changed
+    new_hash = hashlib.md5(new_content).hexdigest()
+    if os.path.exists(LAST_HASH_PATH):
+        last_hash = open(LAST_HASH_PATH).read().strip()
+    else:
+        last_hash = None
+    if last_hash == new_hash:
+        print("Knowledge base document is unchanged. Skipping update.")
+        return
+    # 3. Delete old file(s) from the vector store and OpenAI storage
+    try:
+        files = client.vector_stores.files.list(vector_store_id=vector_store.id)
+        for f in files.data:
+            client.vector_stores.files.delete(vector_store_id=vector_store.id, file_id=f.id)
+            client.files.delete(file_id=f.id)
+        print("Old vector store files removed successfully.")
+    except Exception as e:
+        print(f"Warning: Could not remove old files from vector store: {e}")
+    # 4. Upload the new document to OpenAI and attach to vector store
+    file_bytes = BytesIO(new_content)
+    uploaded_file = client.files.create(file=("knowledge_base.docx", file_bytes), purpose="assistants")
+    client.vector_stores.files.create(vector_store_id=vector_store.id, file_id=uploaded_file.id)
+    print(f"Uploaded new file to vector store (File ID: {uploaded_file.id}).")
+    # 5. Save the new hash for next check
+    open(LAST_HASH_PATH, "w").write(new_hash)
+
+def schedule_daily_refresh(interval_hours=24):
+    refresh_knowledge_base()
+    timer = threading.Timer(interval_hours * 3600, schedule_daily_refresh, [interval_hours])
+    timer.daemon = True
+    timer.start()
+
+# --- Call this at app startup ---
+schedule_daily_refresh(24)
 
 def get_image_suggestions(question_text, img_map):
     """
@@ -415,7 +476,7 @@ def run_main_app():
         st.markdown("---")
 
         # Model Selection
-        st.subheader("🤖 Model Selection")
+        st.subheader("�� Model Selection")
         models = ["gpt-4.1", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]  # Added gpt-4.1
         current_model = st.session_state.get("model", "gpt-4.1")
         # Handle case where current model might not be in the new list
@@ -527,7 +588,7 @@ def run_main_app():
                    )
                    file_id = file_response.id
 
-                   vector_store = client.vector_stores.create(name=f"SOP Vector Store - {st.session_state.user_id[:8]}")
+                   vector_store = get_or_create_vector_store(client)
                    client.vector_stores.file_batches.create_and_poll(
                        vector_store_id=vector_store.id, file_ids=[file_id]
                    )
